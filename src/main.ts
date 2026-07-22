@@ -62,6 +62,13 @@ interface OrganizationPlan {
   assignments: OrganizationAssignment[];
 }
 
+interface CollectionNode {
+  name: string;
+  path: string;
+  paperIds: Set<string>;
+  children: Map<string, CollectionNode>;
+}
+
 type SortMode = "recent" | "title" | "year";
 type MainMode = "library" | "organize";
 
@@ -87,6 +94,7 @@ const state: {
   error: string | null;
   organizationPlan: OrganizationPlan | null;
   organizationLoading: boolean;
+  collapsedCollections: Set<string>;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -105,6 +113,7 @@ const state: {
   error: null,
   organizationPlan: null,
   organizationLoading: false,
+  collapsedCollections: new Set<string>(),
 };
 
 const icons = {
@@ -149,12 +158,72 @@ function formatDate(timestamp: number | null): string {
   }).format(new Date(timestamp));
 }
 
+function displayCollectionPath(collection: string): string {
+  const parts = collection.split(" / ").map((part) => part.trim()).filter(Boolean);
+  if (parts[0]?.toLocaleLowerCase() === "my papers") parts.shift();
+  return parts.join(" / ");
+}
+
+function buildCollectionTree(library: LibraryIndex): CollectionNode[] {
+  const roots = new Map<string, CollectionNode>();
+  for (const paper of library.papers) {
+    for (const originalCollection of paper.collections) {
+      const displayPath = displayCollectionPath(originalCollection);
+      if (!displayPath) continue;
+      const parts = displayPath.split(" / ");
+      let siblings = roots;
+      let accumulated = "";
+      for (const part of parts) {
+        accumulated = accumulated ? `${accumulated} / ${part}` : part;
+        let node = siblings.get(part);
+        if (!node) {
+          node = { name: part, path: accumulated, paperIds: new Set<string>(), children: new Map<string, CollectionNode>() };
+          siblings.set(part, node);
+        }
+        node.paperIds.add(paper.id);
+        siblings = node.children;
+      }
+    }
+  }
+  const sortNodes = (nodes: Iterable<CollectionNode>): CollectionNode[] => [...nodes].sort((left, right) => left.name.localeCompare(right.name, "ja"));
+  const finalize = (nodes: Iterable<CollectionNode>): CollectionNode[] => sortNodes(nodes).map((node) => {
+    const children = finalize(node.children.values());
+    node.children = new Map(children.map((child) => [child.name, child]));
+    return node;
+  });
+  return finalize(roots.values());
+}
+
+function collectionTreeItemTemplate(node: CollectionNode, depth = 0): string {
+  const children = [...node.children.values()];
+  const hasChildren = children.length > 0;
+  const collapsed = state.collapsedCollections.has(node.path);
+  return `<div class="collection-node ${collapsed ? "collapsed" : ""}">
+    <div class="collection-node-row ${state.collection === node.path ? "active" : ""}" style="--tree-depth:${depth}">
+      ${hasChildren
+        ? `<button class="collection-toggle" data-collection-toggle="${escapeHtml(node.path)}" aria-label="${collapsed ? "展開" : "折りたたむ"}" aria-expanded="${!collapsed}">${icons.chevron}</button>`
+        : `<span class="collection-toggle-spacer"></span>`}
+      <button class="collection-select" data-collection="${escapeHtml(node.path)}" title="${escapeHtml(node.path)}">
+        ${icons.folder}<i>${escapeHtml(node.name)}</i><em>${node.paperIds.size}</em>
+      </button>
+    </div>
+    ${hasChildren ? `<div class="collection-children">${children.map((child) => collectionTreeItemTemplate(child, depth + 1)).join("")}</div>` : ""}
+  </div>`;
+}
+
+function countCollectionNodes(nodes: CollectionNode[]): number {
+  return nodes.reduce((count, node) => count + 1 + countCollectionNodes([...node.children.values()]), 0);
+}
+
 function filteredPapers(): PaperRecord[] {
   if (!state.library) return [];
   const terms = state.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const papers = state.library.papers.filter((paper) => {
     if (state.starredOnly && !paper.starred) return false;
-    if (state.collection && !paper.collections.includes(state.collection)) return false;
+    if (state.collection && !paper.collections.some((collection) => {
+      const displayPath = displayCollectionPath(collection);
+      return displayPath === state.collection || displayPath.startsWith(`${state.collection} / `);
+    })) return false;
     if (!terms.length) return true;
     const haystack = [
       paper.title,
@@ -222,10 +291,8 @@ function onboardingTemplate(): string {
 function sidebarTemplate(): string {
   const library = state.library;
   if (!library) return "";
-  const collectionCounts = new Map<string, number>();
-  library.papers.forEach((paper) => paper.collections.forEach((collection) => {
-    collectionCounts.set(collection, (collectionCounts.get(collection) ?? 0) + 1);
-  }));
+  const collectionTree = buildCollectionTree(library);
+  const visibleCollectionCount = countCollectionNodes(collectionTree);
 
   return `<aside class="sidebar">
     <div class="brand"><span class="brand-mark">B</span><span><strong>BUKAN</strong><small>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</small></span></div>
@@ -240,12 +307,9 @@ function sidebarTemplate(): string {
       <button class="nav-item organize-nav ${state.mode === "organize" ? "active" : ""}" data-view="organize" title="${state.workspaceRoot ? "Bukan分類候補を確認" : "ワークスペースを開くと利用できます"}">
         <span>${icons.folder}Bukan 整理</span><em>${state.workspaceRoot ? "→" : "—"}</em>
       </button>
-      <p class="nav-label collections-label">コレクション <em>${library.stats.collectionCount}</em></p>
+      <p class="nav-label collections-label">コレクション <em>${visibleCollectionCount}</em></p>
       <div class="collection-list">
-        ${library.collections.map((collection) => `
-          <button class="nav-item collection-item ${state.collection === collection ? "active" : ""}" data-collection="${escapeHtml(collection)}" title="${escapeHtml(collection)}">
-            <span>${icons.folder}<i>${escapeHtml(collection)}</i></span><em>${collectionCounts.get(collection) ?? 0}</em>
-          </button>`).join("")}
+        ${collectionTree.map((node) => collectionTreeItemTemplate(node)).join("")}
       </div>
     </nav>
     <div class="sidebar-footer">
@@ -280,7 +344,7 @@ function paperListTemplate(papers: PaperRecord[]): string {
 
 function paperRowTemplate(paper: PaperRecord): string {
   const meta = [paper.authors, paper.year?.toString()].filter(Boolean).join(" · ") || "書誌情報なし";
-  const collection = paper.collections[0] ?? "未分類";
+  const collection = displayCollectionPath(paper.collections[0] ?? "") || "未分類";
   return `<button class="paper-row ${state.selectedId === paper.id ? "selected" : ""}" data-paper-id="${paper.id}" type="button">
     <span class="paper-accent"></span>
     <span class="paper-copy">
@@ -331,7 +395,7 @@ function viewerTemplate(): string {
       </div>
     </header>
     <div class="paper-detail-strip">
-      <span><small>COLLECTION</small><strong>${escapeHtml(paper.collections.join(" · ") || "未分類")}</strong></span>
+      <span><small>COLLECTION</small><strong>${escapeHtml(paper.collections.map(displayCollectionPath).filter(Boolean).join(" · ") || "未分類")}</strong></span>
       <span><small>UPDATED</small><strong>${formatDate(paper.modifiedAt)}</strong></span>
       <span><small>FILE SIZE</small><strong>${formatBytes(paper.sizeBytes)}</strong></span>
       ${paper.starred ? `<span class="detail-star">${icons.star}<strong>STARRED</strong></span>` : ""}
@@ -389,7 +453,7 @@ function organizationTemplate(): string {
         <div class="assignment-list">
           ${plan.assignments.slice(0, 120).map((assignment) => `
             <article class="assignment-row ${assignment.reviewRequired ? "needs-review" : ""}">
-              <div class="assignment-title"><span>${assignment.reviewRequired ? "要確認" : "候補"}</span><h3>${escapeHtml(assignment.title)}</h3><small>${escapeHtml(assignment.currentCollections.join(" · ") || "未分類")}</small></div>
+              <div class="assignment-title"><span>${assignment.reviewRequired ? "要確認" : "候補"}</span><h3>${escapeHtml(assignment.title)}</h3><small>${escapeHtml(assignment.currentCollections.map(displayCollectionPath).filter(Boolean).join(" · ") || "未分類")}</small></div>
               <div class="suggestion-chips">
                 ${assignment.suggestedFolders.map((folder) => `<i class="folder-chip">${escapeHtml(folder)}</i>`).join("")}
                 ${assignment.suggestedLabels.map((label) => `<i>${escapeHtml(label)}</i>`).join("")}
@@ -469,6 +533,15 @@ function bindEvents(): void {
       state.mode = "library";
       state.starredOnly = false;
       state.visibleLimit = 120;
+      render();
+    });
+  });
+  document.querySelectorAll<HTMLElement>("[data-collection-toggle]").forEach((element) => {
+    element.addEventListener("click", () => {
+      const path = element.dataset.collectionToggle;
+      if (!path) return;
+      if (state.collapsedCollections.has(path)) state.collapsedCollections.delete(path);
+      else state.collapsedCollections.add(path);
       render();
     });
   });
@@ -642,25 +715,25 @@ function demoLibrary(): LibraryIndex {
   const demoPapers: PaperRecord[] = [
     {
       id: "demo-1", title: "Water on the Moon: A Review of Current Observations and Future Prospects",
-      authors: "Li et al.", year: 2025, collections: ["月の水資源", "お気に入り"], path: "C:\\demo\\moon-water.pdf",
+      authors: "Li et al.", year: 2025, collections: ["My Papers / 月の水資源 / 観測", "My Papers / お気に入り"], path: "C:\\demo\\moon-water.pdf",
       relativePath: "月の水資源\\Li 2025 - Water on the Moon.pdf", fileName: "Li 2025 - Water on the Moon.pdf",
       sizeBytes: 4_820_000, modifiedAt: Date.now() - 86_400_000, starred: true,
     },
     {
       id: "demo-2", title: "Electrostatic Charging and Dust Transport on the Lunar Surface",
-      authors: "Sato & Nakamura", year: 2024, collections: ["月面帯電"], path: "C:\\demo\\lunar-dust.pdf",
+      authors: "Sato & Nakamura", year: 2024, collections: ["My Papers / 月面環境 / 月面帯電"], path: "C:\\demo\\lunar-dust.pdf",
       relativePath: "月面帯電\\Sato 2024 - Electrostatic Charging.pdf", fileName: "Sato 2024 - Electrostatic Charging.pdf",
       sizeBytes: 2_640_000, modifiedAt: Date.now() - 172_800_000, starred: false,
     },
     {
       id: "demo-3", title: "かぐや観測データによる月面プラズマ環境の統計解析",
-      authors: "山田 太郎ほか", year: 2023, collections: ["かぐや観測解析"], path: "C:\\demo\\kaguya.pdf",
+      authors: "山田 太郎ほか", year: 2023, collections: ["My Papers / ミッション / かぐや観測解析"], path: "C:\\demo\\kaguya.pdf",
       relativePath: "かぐや観測解析\\山田 2023 - 月面プラズマ環境.pdf", fileName: "山田 2023 - 月面プラズマ環境.pdf",
       sizeBytes: 8_120_000, modifiedAt: Date.now() - 259_200_000, starred: false,
     },
     {
       id: "demo-4", title: "Semi-implicit Particle-in-Cell Methods for Space Plasma Simulation",
-      authors: "Chen et al.", year: 2022, collections: ["Methods", "ツール系"], path: "C:\\demo\\pic-methods.pdf",
+      authors: "Chen et al.", year: 2022, collections: ["My Papers / Methods / Numerical", "My Papers / ツール系"], path: "C:\\demo\\pic-methods.pdf",
       relativePath: "Methods\\Chen 2022 - Semi-implicit PIC.pdf", fileName: "Chen 2022 - Semi-implicit PIC.pdf",
       sizeBytes: 12_450_000, modifiedAt: Date.now() - 345_600_000, starred: false,
     },

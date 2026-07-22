@@ -95,7 +95,21 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .nav-item.active { color: var(--green); background: #dce5df; font-weight: 600; }
 .nav-item.active em { color: var(--green); }
 .collection-list { overflow-y: auto; margin: 0 -4px; padding: 0 4px 16px; scrollbar-width: thin; }
-.collection-item i { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; }
+.collection-node { min-width: 0; }
+.collection-node.collapsed > .collection-children { display: none; }
+.collection-node-row { position: relative; min-height: 34px; display: grid; grid-template-columns: 20px 1fr; align-items: center; padding-left: calc(var(--tree-depth) * 13px); border-radius: 3px; color: #62655f; }
+.collection-node-row::before { content: ""; position: absolute; left: calc(9px + var(--tree-depth) * 13px); top: -5px; bottom: -5px; width: 1px; background: rgba(114,119,112,.16); pointer-events: none; }
+.collection-node-row:hover { background: rgba(255,255,255,.42); }
+.collection-node-row.active { color: var(--green); background: #dce5df; font-weight: 600; }
+.collection-toggle { position: relative; z-index: 1; width: 20px; height: 28px; display: grid; place-items: center; border: 0; background: transparent; color: #858880; cursor: pointer; padding: 0; }
+.collection-toggle svg { width: 10px; height: 10px; transform: rotate(90deg); transition: transform .16s ease; }
+.collection-node.collapsed > .collection-node-row .collection-toggle svg { transform: rotate(0); }
+.collection-toggle-spacer { position: relative; z-index: 1; width: 5px; height: 5px; justify-self: center; border-radius: 50%; background: #b8bbb4; }
+.collection-select { min-width: 0; height: 34px; padding: 0 7px 0 3px; display: grid; grid-template-columns: 18px minmax(0,1fr) auto; gap: 6px; align-items: center; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+.collection-select svg { width: 13px; height: 13px; }
+.collection-select i { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: normal; font-size: 11px; }
+.collection-select em { color: #999a94; font-size: 9px; font-style: normal; font-weight: 400; }
+.collection-node-row.active .collection-select em { color: var(--green); }
 .sidebar-footer { padding: 14px 16px 18px; border-top: 1px solid var(--line); }
 .drive-status { display: grid; grid-template-columns: 26px 1fr 8px; gap: 8px; align-items: center; }
 .drive-status > span { color: var(--green); }
