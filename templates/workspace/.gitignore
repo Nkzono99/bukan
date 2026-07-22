@@ -1,0 +1,5 @@
+cache/
+data/paperpile.bib
+*.log
+.DS_Store
+Thumbs.db

@@ -1,8 +1,8 @@
 # Bukan
 
-Paperpile が Google Drive に同期した PDF を、読み取り専用で整理・検索・閲覧する
-Tauri デスクトップアプリです。研究ワークスペースの運用方針は [SPEC.md](SPEC.md) を
-参照してください。
+Paperpile が Google Drive に同期した PDF を読み取り専用で整理・検索・閲覧する、
+CLI と Tauri デスクトップアプリです。このリポジトリは Bukan 本体だけを管理し、
+ノートや検索結果などの研究データは `bukan init` で作る外部ワークスペースへ分離します。
 
 ## 現在できること
 
@@ -25,6 +25,13 @@ Paperpile 配下に対する書き込み・移動・削除操作は実装して�
 ```powershell
 npm install
 npm run desktop:dev
+```
+
+CLI を実行する場合:
+
+```powershell
+cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- --help
+cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- init D:\Research\lunar-workspace
 ```
 
 フロントエンドのみをビルドする場合:
@@ -54,13 +61,10 @@ npm run desktop:build
 
 生成物は `src-tauri/target/release/bundle/` に出力されます。
 
-## ワークスペース
+## 外部ワークスペース
 
-- `data/`: Paperpile から自動同期する BibTeX（直接編集禁止）
-- `queries/`: 再現可能な検索条件
-- `candidates/`: 未登録候補
-- `reports/`: 検索レポートとエビデンス表
-- `imports/`: Paperpile へ戻す BibTeX と PDF
-- `notes/`, `cache/`: 抽出テキスト、要約、作業キャッシュ
+`bukan init <path>` は指定先へ `bukan.toml`、分類体系、`AGENTS.md`、および
+`data/`, `notes/`, `queries/`, `candidates/`, `reports/`, `imports/`, `cache/`
+を生成します。ワークスペースは独立した Git リポジトリとして管理できます。
 
-詳細な運用ルールは [AGENTS.md](AGENTS.md) に固定しています。
+形式と運用方針は [ワークスペース仕様](docs/workspace.md) を参照してください。

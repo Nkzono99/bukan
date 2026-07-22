@@ -1,0 +1,11 @@
+version = 1
+
+[folders]
+root = "Bukan"
+axes = ["分野", "トピック", "対象", "ミッション", "プロジェクト"]
+
+[labels]
+prefix = "bukan:"
+namespaces = ["method", "type", "status", "keyword"]
+status = ["未整理", "要確認", "整理済み"]
+type = ["article", "review", "proceedings", "thesis", "book", "teaching-material"]

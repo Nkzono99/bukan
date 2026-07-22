@@ -35,10 +35,19 @@ interface LibraryIndex {
   warnings: string[];
 }
 
+interface WorkspaceDescriptor {
+  root: string;
+  name: string;
+  version: number;
+  paperpileRoot: string | null;
+  paperpileMode: string;
+}
+
 type SortMode = "recent" | "title" | "year";
 
 const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 if (!app) throw new Error("App mount point was not found");
+const isDemoMode = import.meta.env.DEV && new URLSearchParams(window.location.search).has("demo");
 
 const state: {
   loading: boolean;
@@ -46,6 +55,8 @@ const state: {
   scanning: boolean;
   locations: LibraryLocation[];
   library: LibraryIndex | null;
+  workspaceRoot: string | null;
+  workspaceName: string | null;
   query: string;
   collection: string | null;
   starredOnly: boolean;
@@ -59,6 +70,8 @@ const state: {
   scanning: false,
   locations: [],
   library: null,
+  workspaceRoot: null,
+  workspaceName: null,
   query: "",
   collection: null,
   starredOnly: false,
@@ -155,7 +168,18 @@ function onboardingTemplate(): string {
       <h1>文献を、読む場所へ。</h1>
       <p class="onboarding-copy">Paperpile のコレクションをそのままに、集めた PDF を横断して探し、読み進めるための静かなワークスペースです。</p>
       <div class="connection-panel">
-        <div class="panel-heading"><span>Google Drive を検出</span><em>${state.locations.length ? `${state.locations.length} 件` : "未接続"}</em></div>
+        <div class="panel-heading"><span>Bukan ワークスペース</span><em>推奨</em></div>
+        <div class="workspace-choices">
+          <button class="workspace-choice open-workspace" type="button">
+            <span>${icons.folder}</span><strong>ワークスペースを開く</strong><small>bukan.toml のあるフォルダ</small>
+          </button>
+          <button class="workspace-choice create-workspace" type="button">
+            <span>+</span><strong>新しく初期化</strong><small>研究データを別の場所に作成</small>
+          </button>
+        </div>
+      </div>
+      <div class="connection-panel quick-preview-panel">
+        <div class="panel-heading"><span>Paperpile を直接プレビュー</span><em>${state.locations.length ? `${state.locations.length} 件` : "未接続"}</em></div>
         ${discovered}
         <button class="secondary-button choose-folder" type="button">別の Paperpile フォルダを選ぶ</button>
       </div>
@@ -178,7 +202,7 @@ function sidebarTemplate(): string {
   }));
 
   return `<aside class="sidebar">
-    <div class="brand"><span class="brand-mark">B</span><span><strong>BUKAN</strong><small>文献ワークスペース</small></span></div>
+    <div class="brand"><span class="brand-mark">B</span><span><strong>BUKAN</strong><small>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</small></span></div>
     <nav class="primary-nav" aria-label="ライブラリ">
       <p class="nav-label">ライブラリ</p>
       <button class="nav-item ${!state.collection && !state.starredOnly ? "active" : ""}" data-view="all">
@@ -196,7 +220,7 @@ function sidebarTemplate(): string {
       </div>
     </nav>
     <div class="sidebar-footer">
-      <div class="drive-status"><span>${icons.drive}</span><div><strong>Google Drive</strong><small>${escapeHtml(library.root)}</small></div><i></i></div>
+      <div class="drive-status"><span>${state.workspaceRoot ? icons.folder : icons.drive}</span><div><strong>${escapeHtml(state.workspaceName ?? "Google Drive")}</strong><small>${escapeHtml(state.workspaceRoot ?? library.root)}</small></div><i></i></div>
       <button class="change-library" type="button">ライブラリを変更</button>
     </div>
   </aside>`;
@@ -295,8 +319,9 @@ function workspaceTemplate(): string {
     ${sidebarTemplate()}
     <main class="workspace-main">
       <header class="topbar">
-        <div class="breadcrumb"><span>Paperpile</span>${icons.chevron}<strong>${escapeHtml(state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers"))}</strong></div>
+        <div class="breadcrumb"><span>${escapeHtml(state.workspaceName ?? "Paperpile")}</span>${icons.chevron}<strong>${escapeHtml(state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers"))}</strong></div>
         <div class="topbar-actions">
+          ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
           ${state.library?.warnings.length ? `<span class="warning-count" title="読み込めなかったファイルがあります">${state.library.warnings.length} warnings</span>` : ""}
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
@@ -320,11 +345,17 @@ function render(): void {
 
 function bindEvents(): void {
   document.querySelectorAll<HTMLElement>("[data-library-path]").forEach((element) => {
-    element.addEventListener("click", () => void loadLibrary(element.dataset.libraryPath ?? ""));
+    element.addEventListener("click", () => {
+      state.workspaceRoot = null;
+      state.workspaceName = null;
+      void loadLibrary(element.dataset.libraryPath ?? "");
+    });
   });
   document.querySelectorAll<HTMLElement>(".choose-folder, .change-library").forEach((element) => {
     element.addEventListener("click", () => void chooseLibrary());
   });
+  document.querySelector<HTMLElement>(".open-workspace")?.addEventListener("click", () => void chooseWorkspace(false));
+  document.querySelector<HTMLElement>(".create-workspace")?.addEventListener("click", () => void chooseWorkspace(true));
   document.querySelector<HTMLElement>("[data-view='all']")?.addEventListener("click", () => {
     state.collection = null;
     state.starredOnly = false;
@@ -404,11 +435,48 @@ async function runPaperAction(command: "open_paper" | "reveal_paper"): Promise<v
 async function chooseLibrary(): Promise<void> {
   try {
     const selected = await open({ directory: true, multiple: false, title: "Paperpile フォルダを選択" });
-    if (selected) await loadLibrary(selected);
+    if (selected) {
+      state.workspaceRoot = null;
+      state.workspaceName = null;
+      localStorage.removeItem("bukan.workspaceRoot");
+      await loadLibrary(selected);
+    }
   } catch (error) {
     state.error = String(error);
     render();
   }
+}
+
+async function chooseWorkspace(create: boolean): Promise<void> {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: create ? "ワークスペースを作成するフォルダ" : "Bukan ワークスペースを選択",
+    });
+    if (!selected) return;
+    state.loadingLabel = create ? "ワークスペースを初期化しています" : "ワークスペースを開いています";
+    state.loading = true;
+    render();
+    const descriptor = create
+      ? await invoke<WorkspaceDescriptor>("initialize_workspace", { root: selected, name: null, paperpilePath: "auto" })
+      : await invoke<WorkspaceDescriptor>("open_workspace", { root: selected });
+    await activateWorkspace(descriptor);
+  } catch (error) {
+    state.loading = false;
+    state.error = String(error);
+    render();
+  }
+}
+
+async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void> {
+  if (!descriptor.paperpileRoot) {
+    throw new Error("マウント済みの Paperpile が見つかりません。bukan.toml の paperpile.path を確認してください。");
+  }
+  state.workspaceRoot = descriptor.root;
+  state.workspaceName = descriptor.name;
+  localStorage.setItem("bukan.workspaceRoot", descriptor.root);
+  await loadLibrary(descriptor.paperpileRoot);
 }
 
 async function loadLibrary(root: string, quiet = false): Promise<void> {
@@ -494,7 +562,7 @@ function demoLibrary(): LibraryIndex {
 }
 
 async function initialize(): Promise<void> {
-  if (import.meta.env.DEV && new URLSearchParams(window.location.search).has("demo")) {
+  if (isDemoMode) {
     state.library = demoLibrary();
     state.loading = false;
     render();
@@ -502,6 +570,16 @@ async function initialize(): Promise<void> {
   }
   render();
   try {
+    const savedWorkspace = localStorage.getItem("bukan.workspaceRoot");
+    if (savedWorkspace) {
+      try {
+        const descriptor = await invoke<WorkspaceDescriptor>("open_workspace", { root: savedWorkspace });
+        await activateWorkspace(descriptor);
+        return;
+      } catch {
+        localStorage.removeItem("bukan.workspaceRoot");
+      }
+    }
     state.locations = await invoke<LibraryLocation[]>("detect_libraries");
     const savedRoot = localStorage.getItem("bukan.paperpileRoot");
     const preferred = savedRoot ?? (state.locations.length === 1 ? state.locations[0]?.path : null);

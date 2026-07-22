@@ -1,0 +1,9 @@
+version = 1
+name = "My Literature Workspace"
+
+[paperpile]
+path = "auto"
+read_only = true
+
+[bibliography]
+path = "data/paperpile.bib"

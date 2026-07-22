@@ -41,9 +41,16 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .onboarding-card h1 { font: 500 clamp(42px, 5vw, 68px)/1.05 "Newsreader", serif; letter-spacing: -.035em; margin: 0; }
 .onboarding-copy { color: #676a64; max-width: 560px; font-size: 15px; line-height: 1.9; margin: 26px 0 36px; }
 .connection-panel { max-width: 590px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); padding: 22px 0; }
+.quick-preview-panel { border-top: 0; }
 .panel-heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; font-size: 12px; font-weight: 600; }
 .panel-heading em { color: var(--green); font-style: normal; font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
 .detected-list { display: grid; gap: 8px; }
+.workspace-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.workspace-choice { min-height: 86px; border: 1px solid var(--line); background: #f3f1eb; padding: 14px; display: grid; grid-template-columns: 30px 1fr; grid-template-rows: auto auto; column-gap: 10px; text-align: left; cursor: pointer; }
+.workspace-choice > span { grid-row: 1 / 3; width: 28px; height: 28px; display: grid; place-items: center; color: var(--green); border: 1px solid #aebbb4; font-size: 18px; }
+.workspace-choice strong { align-self: end; font-size: 11px; }
+.workspace-choice small { color: var(--muted); align-self: start; font-size: 8px; margin-top: 4px; }
+.workspace-choice:hover { border-color: var(--green); background: #edf3ef; }
 .detected-drive { border: 1px solid #c7d4cc; background: #f0f5f1; padding: 14px 16px; display: grid; grid-template-columns: 38px 1fr 30px; gap: 12px; align-items: center; text-align: left; cursor: pointer; transition: .2s ease; }
 .detected-drive:hover { border-color: var(--green); transform: translateY(-1px); box-shadow: 0 8px 24px rgba(40,91,80,.08); }
 .detected-icon { width: 34px; height: 34px; display: grid; place-items: center; background: var(--green); color: white; }
@@ -103,6 +110,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .breadcrumb svg { width: 10px; }
 .breadcrumb strong { color: var(--ink); font-weight: 500; }
 .topbar-actions { display: flex; align-items: center; gap: 12px; }
+.demo-badge { color: #865a22; background: #f0dfc5; border: 1px solid #d7b884; padding: 4px 7px; font-size: 8px; font-weight: 600; letter-spacing: .08em; }
 .scan-status { color: var(--green); display: inline-flex; align-items: center; gap: 7px; font-size: 9px; }
 .scan-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: scanPulse 1.15s ease-in-out infinite; }
 @keyframes scanPulse { 50% { opacity: .25; transform: scale(.72); } }

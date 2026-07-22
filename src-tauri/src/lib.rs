@@ -11,6 +11,8 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::{DirEntry, WalkDir};
 
+pub mod workspace;
+
 #[derive(Default)]
 struct AppState {
     active_root: Mutex<Option<PathBuf>>,
@@ -18,45 +20,45 @@ struct AppState {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LibraryLocation {
-    path: String,
-    drive: String,
-    display_name: String,
+pub struct LibraryLocation {
+    pub path: String,
+    pub drive: String,
+    pub display_name: String,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct PaperRecord {
-    id: String,
-    title: String,
-    authors: Option<String>,
-    year: Option<u16>,
-    collections: Vec<String>,
-    path: String,
-    relative_path: String,
-    file_name: String,
-    size_bytes: u64,
-    modified_at: Option<u64>,
-    starred: bool,
+pub struct PaperRecord {
+    pub id: String,
+    pub title: String,
+    pub authors: Option<String>,
+    pub year: Option<u16>,
+    pub collections: Vec<String>,
+    pub path: String,
+    pub relative_path: String,
+    pub file_name: String,
+    pub size_bytes: u64,
+    pub modified_at: Option<u64>,
+    pub starred: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LibraryStats {
-    paper_count: usize,
-    collection_count: usize,
-    starred_count: usize,
-    total_bytes: u64,
+pub struct LibraryStats {
+    pub paper_count: usize,
+    pub collection_count: usize,
+    pub starred_count: usize,
+    pub total_bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct LibraryIndex {
-    root: String,
-    papers: Vec<PaperRecord>,
-    collections: Vec<String>,
-    stats: LibraryStats,
-    warnings: Vec<String>,
+pub struct LibraryIndex {
+    pub root: String,
+    pub papers: Vec<PaperRecord>,
+    pub collections: Vec<String>,
+    pub stats: LibraryStats,
+    pub warnings: Vec<String>,
 }
 
 #[derive(Debug)]
@@ -83,6 +85,20 @@ fn detect_libraries() -> Vec<LibraryLocation> {
             }
         })
         .collect()
+}
+
+#[tauri::command]
+fn initialize_workspace(
+    root: String,
+    name: Option<String>,
+    paperpile_path: Option<String>,
+) -> Result<workspace::WorkspaceDescriptor, String> {
+    workspace::init_workspace(Path::new(&root), name.as_deref(), paperpile_path.as_deref())
+}
+
+#[tauri::command]
+fn open_workspace(root: String) -> Result<workspace::WorkspaceDescriptor, String> {
+    workspace::describe_workspace(Path::new(&root))
 }
 
 #[tauri::command]
@@ -135,7 +151,7 @@ fn authorized_paper_path(state: &State<'_, AppState>, requested: &str) -> Result
     Ok(path)
 }
 
-fn detect_paperpile_roots() -> Vec<PathBuf> {
+pub fn detect_paperpile_roots() -> Vec<PathBuf> {
     let mut candidates = Vec::new();
 
     #[cfg(target_os = "windows")]
@@ -220,7 +236,7 @@ fn is_paperpile_root(path: &Path) -> bool {
     path.is_dir() && path.join("All Papers").is_dir()
 }
 
-fn normalize_library_root(path: &Path) -> Result<PathBuf, String> {
+pub fn normalize_library_root(path: &Path) -> Result<PathBuf, String> {
     let candidate = if path.file_name().is_some_and(|name| name == "All Papers") {
         path.parent().unwrap_or(path)
     } else {
@@ -233,7 +249,7 @@ fn normalize_library_root(path: &Path) -> Result<PathBuf, String> {
         .map_err(|error| format!("Paperpileフォルダを読み取れませんでした: {error}"))
 }
 
-fn build_index(root: &Path) -> Result<LibraryIndex, String> {
+pub fn build_index(root: &Path) -> Result<LibraryIndex, String> {
     let all_papers = root.join("All Papers");
     let starred_papers = root.join("Starred Papers");
     let starred_keys = if starred_papers.is_dir() {
@@ -430,6 +446,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             detect_libraries,
+            initialize_workspace,
+            open_workspace,
             scan_library,
             open_paper,
             reveal_paper
