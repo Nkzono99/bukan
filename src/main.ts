@@ -71,6 +71,7 @@ interface CollectionNode {
 
 type SortMode = "recent" | "title" | "year";
 type MainMode = "library" | "organize";
+type ThemeMode = "system" | "light" | "dark";
 
 const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 if (!app) throw new Error("App mount point was not found");
@@ -95,6 +96,10 @@ const state: {
   organizationPlan: OrganizationPlan | null;
   organizationLoading: boolean;
   collapsedCollections: Set<string>;
+  theme: ThemeMode;
+  sidebarCollapsed: boolean;
+  listCollapsed: boolean;
+  commandOpen: boolean;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -114,6 +119,10 @@ const state: {
   organizationPlan: null,
   organizationLoading: false,
   collapsedCollections: new Set<string>(),
+  theme: (localStorage.getItem("bukan.theme") as ThemeMode | null) ?? "system",
+  sidebarCollapsed: false,
+  listCollapsed: false,
+  commandOpen: false,
 };
 
 const icons = {
@@ -126,7 +135,35 @@ const icons = {
   reveal: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 7.5h7l2-2h9v13H3v-11Z"/><path d="m14 11 3 2-3 2"/></svg>`,
   chevron: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>`,
   drive: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8.5 3-6 10.5L6 20h12l3.5-6.5L15.5 3h-7Z"/><path d="m8.5 3 6 10.5M2.5 13.5h12M18 20l-3.5-6.5"/></svg>`,
+  moon: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 15.5A8 8 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5Z"/></svg>`,
+  sun: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v2M12 20v2M4.93 4.93l1.42 1.42M17.65 17.65l1.42 1.42M2 12h2M20 12h2M4.93 19.07l1.42-1.42M17.65 6.35l1.42-1.42"/></svg>`,
+  command: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6H6a3 3 0 1 0 3 3V6Zm0 0v12H6a3 3 0 1 1 3-3M15 6h3a3 3 0 1 1-3 3V6Zm0 0v12h3a3 3 0 1 0-3-3"/></svg>`,
+  panel: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>`,
+  list: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".7"/><circle cx="4" cy="12" r=".7"/><circle cx="4" cy="18" r=".7"/></svg>`,
+  settings: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.28.58.68.6 1.1v.1h1v4h-.1a1.7 1.7 0 0 0-1.5.8Z"/></svg>`,
 };
+
+function resolvedTheme(): "light" | "dark" {
+  if (state.theme === "system") return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  return state.theme;
+}
+
+function applyTheme(): void {
+  document.documentElement.dataset.theme = resolvedTheme();
+  document.documentElement.dataset.themeMode = state.theme;
+}
+
+function setTheme(theme: ThemeMode): void {
+  state.theme = theme;
+  localStorage.setItem("bukan.theme", theme);
+  applyTheme();
+  render();
+}
+
+function cycleTheme(): void {
+  const next: Record<ThemeMode, ThemeMode> = { system: "light", light: "dark", dark: "system" };
+  setTheme(next[state.theme]);
+}
 
 function escapeHtml(value: string): string {
   return value.replace(/[&<>'"]/g, (character) => {
@@ -294,8 +331,8 @@ function sidebarTemplate(): string {
   const collectionTree = buildCollectionTree(library);
   const visibleCollectionCount = countCollectionNodes(collectionTree);
 
-  return `<aside class="sidebar">
-    <div class="brand"><span class="brand-mark">B</span><span><strong>BUKAN</strong><small>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</small></span></div>
+  return `<aside class="sidebar" aria-label="コレクション">
+    <div class="sidebar-header"><span><strong>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</strong><small>${library.stats.paperCount} papers</small></span><button class="sidebar-close" type="button" title="サイドバーを格納" aria-label="サイドバーを格納">${icons.panel}</button></div>
     <nav class="primary-nav" aria-label="ライブラリ">
       <p class="nav-label">ライブラリ</p>
       <button class="nav-item ${!state.collection && !state.starredOnly ? "active" : ""}" data-view="all">
@@ -317,6 +354,49 @@ function sidebarTemplate(): string {
       <button class="change-library" type="button">ライブラリを変更</button>
     </div>
   </aside>`;
+}
+
+function railTemplate(): string {
+  const themeIcon = resolvedTheme() === "dark" ? icons.moon : icons.sun;
+  const themeLabel = state.theme === "system" ? "System" : state.theme === "light" ? "Light" : "Dark";
+  return `<aside class="app-rail" aria-label="アプリナビゲーション">
+    <button class="rail-brand" type="button" data-rail-action="sidebar" title="コレクションを開閉" aria-label="コレクションを開閉">B</button>
+    <nav class="rail-nav">
+      <button class="rail-button ${state.mode === "library" && !state.starredOnly ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
+      <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
+      <button class="rail-button ${state.mode === "organize" ? "active" : ""}" type="button" data-rail-action="organize" title="Bukan 整理" aria-label="Bukan 整理">${icons.folder}</button>
+    </nav>
+    <div class="rail-bottom">
+      <button class="rail-button" type="button" data-rail-action="command" title="コマンド（Ctrl+K）" aria-label="コマンドパレット">${icons.command}</button>
+      <button class="rail-button theme-button" type="button" data-rail-action="theme" title="テーマ: ${themeLabel}" aria-label="テーマ: ${themeLabel}">${themeIcon}<span>${themeLabel.slice(0, 1)}</span></button>
+    </div>
+  </aside>`;
+}
+
+function commandPaletteTemplate(): string {
+  if (!state.commandOpen) return "";
+  const commands = [
+    ["search", icons.search, "論文を検索", "現在のライブラリ"],
+    ["all", icons.library, "すべての文献", "ライブラリ"],
+    ["starred", icons.star, "スター付き文献", "ライブラリ"],
+    ["organize", icons.folder, "Bukan 整理を開く", "ワークスペース"],
+    ["toggle-sidebar", icons.panel, state.sidebarCollapsed ? "コレクションを表示" : "コレクションを格納", "表示"],
+    ["toggle-list", icons.list, state.listCollapsed ? "論文一覧を表示" : "論文一覧を格納", "表示"],
+    ["theme-system", icons.settings, "テーマ: System", "表示"],
+    ["theme-light", icons.sun, "テーマ: Light", "表示"],
+    ["theme-dark", icons.moon, "テーマ: Dark", "表示"],
+    ["refresh", icons.refresh, "ライブラリを再読み込み", "データ"],
+  ];
+  return `<div class="command-backdrop" role="presentation">
+    <section class="command-palette" role="dialog" aria-modal="true" aria-label="コマンドパレット">
+      <label class="command-search">${icons.search}<input id="command-input" type="search" placeholder="検索またはコマンドを入力…" autocomplete="off" /></label>
+      <div class="command-results">
+        ${commands.map(([action, icon, label, group], index) => `<button class="command-item ${index === 0 ? "keyboard-active" : ""}" type="button" data-command-action="${action}" data-command-search="${escapeHtml(`${label} ${group}`.toLocaleLowerCase())}">${icon}<span><strong>${label}</strong><small>${group}</small></span>${index === 0 ? "<kbd>/</kbd>" : ""}</button>`).join("")}
+        <p class="command-empty">一致するコマンドがありません</p>
+      </div>
+      <footer><span><kbd>↑</kbd><kbd>↓</kbd> 移動</span><span><kbd>Esc</kbd> 閉じる</span></footer>
+    </section>
+  </div>`;
 }
 
 function paperListTemplate(papers: PaperRecord[]): string {
@@ -471,7 +551,8 @@ function workspaceTemplate(): string {
   const currentTitle = state.mode === "organize"
     ? "Bukan 整理"
     : state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers");
-  return `<div class="workspace">
+  return `<div class="workspace ${state.sidebarCollapsed ? "sidebar-collapsed" : ""}">
+    ${railTemplate()}
     ${sidebarTemplate()}
     <main class="workspace-main">
       <header class="topbar">
@@ -480,11 +561,14 @@ function workspaceTemplate(): string {
           ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
           ${state.library?.warnings.length ? `<span class="warning-count" title="読み込めなかったファイルがあります">${state.library.warnings.length} warnings</span>` : ""}
+          <button class="command-trigger" type="button">${icons.search}<span>検索とコマンド</span><kbd>Ctrl K</kbd></button>
+          ${state.mode === "library" ? `<button class="icon-button toggle-list" title="論文一覧を${state.listCollapsed ? "表示" : "格納"}" aria-label="論文一覧を${state.listCollapsed ? "表示" : "格納"}">${icons.list}</button>` : ""}
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
         </div>
       </header>
-      ${state.mode === "organize" ? organizationTemplate() : `<div class="content-grid">${paperListTemplate(papers)}${viewerTemplate()}</div>`}
+      ${state.mode === "organize" ? organizationTemplate() : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""}">${paperListTemplate(papers)}${viewerTemplate()}</div>`}
     </main>
+    ${commandPaletteTemplate()}
   </div>`;
 }
 
@@ -493,6 +577,7 @@ function loadingTemplate(message = "Google Drive を探しています"): string
 }
 
 function render(): void {
+  applyTheme();
   if (state.loading) app.innerHTML = loadingTemplate(state.loadingLabel);
   else if (!state.library) app.innerHTML = onboardingTemplate();
   else app.innerHTML = workspaceTemplate();
@@ -500,6 +585,72 @@ function render(): void {
 }
 
 function bindEvents(): void {
+  document.querySelectorAll<HTMLElement>("[data-rail-action]").forEach((element) => {
+    element.addEventListener("click", () => {
+      const action = element.dataset.railAction;
+      if (action === "sidebar") {
+        state.sidebarCollapsed = !state.sidebarCollapsed;
+        render();
+      } else if (action === "library") {
+        state.mode = "library";
+        state.collection = null;
+        state.starredOnly = false;
+        render();
+      } else if (action === "search") {
+        focusLibrarySearch();
+      } else if (action === "organize") {
+        void openOrganization();
+      } else if (action === "command") {
+        openCommandPalette();
+      } else if (action === "theme") {
+        cycleTheme();
+      }
+    });
+  });
+  document.querySelector<HTMLElement>(".sidebar-close")?.addEventListener("click", () => {
+    state.sidebarCollapsed = true;
+    render();
+  });
+  document.querySelector<HTMLElement>(".command-trigger")?.addEventListener("click", openCommandPalette);
+  document.querySelector<HTMLElement>(".toggle-list")?.addEventListener("click", () => {
+    state.listCollapsed = !state.listCollapsed;
+    render();
+  });
+  document.querySelector<HTMLElement>(".command-backdrop")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeCommandPalette();
+  });
+  document.querySelectorAll<HTMLElement>("[data-command-action]").forEach((element) => {
+    element.addEventListener("click", () => executeCommand(element.dataset.commandAction ?? ""));
+  });
+  const commandInput = document.querySelector<HTMLInputElement>("#command-input");
+  commandInput?.addEventListener("input", () => {
+    const query = commandInput.value.trim().toLocaleLowerCase();
+    let visibleCount = 0;
+    document.querySelectorAll<HTMLElement>(".command-item").forEach((item) => {
+      const visible = !query || (item.dataset.commandSearch ?? "").includes(query);
+      item.hidden = !visible;
+      if (visible) visibleCount += 1;
+    });
+    document.querySelectorAll(".command-item.keyboard-active").forEach((item) => item.classList.remove("keyboard-active"));
+    document.querySelector<HTMLElement>(".command-item:not([hidden])")?.classList.add("keyboard-active");
+    document.querySelector<HTMLElement>(".command-empty")?.classList.toggle("visible", visibleCount === 0);
+  });
+  commandInput?.addEventListener("keydown", (event) => {
+    const items = [...document.querySelectorAll<HTMLButtonElement>(".command-item:not([hidden])")];
+    if (!items.length) return;
+    const currentIndex = items.findIndex((item) => item.classList.contains("keyboard-active"));
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault();
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = (Math.max(currentIndex, 0) + direction + items.length) % items.length;
+      items.forEach((item) => item.classList.remove("keyboard-active"));
+      items[nextIndex]?.classList.add("keyboard-active");
+      items[nextIndex]?.scrollIntoView({ block: "nearest" });
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      (items[Math.max(currentIndex, 0)] as HTMLButtonElement | undefined)?.click();
+    }
+  });
   document.querySelectorAll<HTMLElement>("[data-library-path]").forEach((element) => {
     element.addEventListener("click", () => {
       state.workspaceRoot = null;
@@ -588,6 +739,51 @@ function bindEvents(): void {
       if (title) title.textContent = "プレビューを読み込めませんでした";
       if (detail) detail.textContent = "「別ウィンドウで開く」をお試しください";
     }, { once: true });
+  }
+}
+
+function openCommandPalette(): void {
+  state.commandOpen = true;
+  render();
+  window.setTimeout(() => document.querySelector<HTMLInputElement>("#command-input")?.focus(), 0);
+}
+
+function closeCommandPalette(): void {
+  state.commandOpen = false;
+  render();
+}
+
+function focusLibrarySearch(): void {
+  state.mode = "library";
+  state.listCollapsed = false;
+  state.commandOpen = false;
+  render();
+  window.setTimeout(() => document.querySelector<HTMLInputElement>("#search-input")?.focus(), 0);
+}
+
+function executeCommand(action: string): void {
+  state.commandOpen = false;
+  if (action === "search") {
+    focusLibrarySearch();
+  } else if (action === "all" || action === "starred") {
+    state.mode = "library";
+    state.collection = null;
+    state.starredOnly = action === "starred";
+    render();
+  } else if (action === "organize") {
+    void openOrganization();
+  } else if (action === "toggle-sidebar") {
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    render();
+  } else if (action === "toggle-list") {
+    state.listCollapsed = !state.listCollapsed;
+    render();
+  } else if (action.startsWith("theme-")) {
+    setTheme(action.slice(6) as ThemeMode);
+  } else if (action === "refresh") {
+    if (state.library) void loadLibrary(state.library.root, true);
+  } else {
+    render();
   }
 }
 
@@ -754,6 +950,7 @@ function demoLibrary(): LibraryIndex {
 }
 
 async function initialize(): Promise<void> {
+  applyTheme();
   if (isDemoMode) {
     state.library = demoLibrary();
     state.loading = false;
@@ -788,5 +985,29 @@ async function initialize(): Promise<void> {
   state.loading = false;
   render();
 }
+
+window.addEventListener("keydown", (event) => {
+  const target = event.target as HTMLElement | null;
+  const isTyping = target?.matches("input, textarea, select, [contenteditable='true']") ?? false;
+  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+    event.preventDefault();
+    if (state.commandOpen) closeCommandPalette();
+    else openCommandPalette();
+  } else if (event.key === "Escape" && state.commandOpen) {
+    event.preventDefault();
+    closeCommandPalette();
+  } else if (event.key === "/" && !isTyping && state.library) {
+    event.preventDefault();
+    focusLibrarySearch();
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "b" && state.library) {
+    event.preventDefault();
+    state.sidebarCollapsed = !state.sidebarCollapsed;
+    render();
+  }
+});
+
+window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+  if (state.theme === "system") applyTheme();
+});
 
 void initialize();
