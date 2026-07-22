@@ -47,3 +47,16 @@ bukan:keyword:lunar-dust
 
 同じ文献は複数フォルダおよび複数ラベルへ所属できます。生成された整理案は、
 Paperpile の公式APIが利用可能になるまで適用計画として保存します。
+
+## 整理計画の生成
+
+`taxonomy.toml` の `folder_rules` と `label_rules` は、タイトル、ファイル名、既存の
+Paperpileコレクション名に照合する用語を定義します。
+
+```powershell
+bukan organize suggest D:\Research\my-workspace
+```
+
+結果は既定で `reports/bukan-organization-plan.json` に保存されます。候補がない文献は
+`bukan:status:未整理`、候補がある文献も適用前は `bukan:status:要確認` になります。
+ルールベースの分類は本文の意味を保証しないため、自動確定には使用しません。

@@ -15,6 +15,8 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - コレクション、スター、更新日、タイトル、出版年による絞り込み・並び替え
 - PDF のアプリ内表示、既定アプリでの表示、エクスプローラーでの表示
 - 検出できない場合の手動フォルダ選択
+- 外部ワークスペースの初期化・診断・全件走査
+- `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
 
 Paperpile 配下に対する書き込み・移動・削除操作は実装していません。
 
@@ -32,7 +34,10 @@ CLI を実行する場合:
 ```powershell
 cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- --help
 cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- init D:\Research\lunar-workspace
+cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- organize suggest D:\Research\lunar-workspace
 ```
+
+または `npm run cli -- <command>` でも実行できます。
 
 フロントエンドのみをビルドする場合:
 
@@ -68,3 +73,7 @@ npm run desktop:build
 を生成します。ワークスペースは独立した Git リポジトリとして管理できます。
 
 形式と運用方針は [ワークスペース仕様](docs/workspace.md) を参照してください。
+
+整理候補は `reports/bukan-organization-plan.json` に保存されます。初期ルールは
+タイトル・ファイル名・既存コレクションを根拠にするため、Paperpileへ反映する前に
+`要確認` の項目をレビューしてください。

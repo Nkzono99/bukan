@@ -9,7 +9,9 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "cli": "cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli --",
+    "cli:build": "cargo build --release --manifest-path src-tauri/Cargo.toml --bin bukan-cli"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",

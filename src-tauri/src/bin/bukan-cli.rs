@@ -1,4 +1,4 @@
-use bukan_lib::{build_index, detect_paperpile_roots, workspace};
+use bukan_lib::{build_index, detect_paperpile_roots, organization, workspace};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
@@ -36,6 +36,22 @@ enum Command {
         workspace: PathBuf,
         #[arg(long)]
         json: bool,
+    },
+    /// Generate a reviewable Bukan folder and label assignment plan.
+    Organize {
+        #[command(subcommand)]
+        command: OrganizeCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum OrganizeCommand {
+    /// Suggest assignments from taxonomy.toml and save them under reports/.
+    Suggest {
+        #[arg(default_value = ".")]
+        workspace: PathBuf,
+        #[arg(long)]
+        output: Option<PathBuf>,
     },
 }
 
@@ -111,6 +127,34 @@ fn run(cli: Cli) -> Result<(), String> {
                 println!("Warnings: {}", index.warnings.len());
             }
         }
+        Command::Organize { command } => match command {
+            OrganizeCommand::Suggest {
+                workspace: root,
+                output,
+            } => {
+                let descriptor = workspace::describe_workspace(&root)?;
+                let paperpile_root = descriptor
+                    .paperpile_root
+                    .ok_or_else(|| "Paperpile library was not detected".to_string())?;
+                let index = build_index(PathBuf::from(paperpile_root).as_path())?;
+                let taxonomy =
+                    organization::load_taxonomy(PathBuf::from(&descriptor.root).as_path())?;
+                let plan = organization::generate_plan(&index, &taxonomy);
+                let output = output.unwrap_or_else(|| {
+                    PathBuf::from(&descriptor.root)
+                        .join("reports")
+                        .join("bukan-organization-plan.json")
+                });
+                let contents = serde_json::to_string_pretty(&plan)
+                    .map_err(|error| format!("could not serialize plan: {error}"))?;
+                std::fs::write(&output, contents)
+                    .map_err(|error| format!("could not write {}: {error}", output.display()))?;
+                println!("Plan: {}", output.display());
+                println!("Papers: {}", plan.paper_count);
+                println!("Classified: {}", plan.classified_count);
+                println!("Needs manual review: {}", plan.review_required_count);
+            }
+        },
     }
     Ok(())
 }

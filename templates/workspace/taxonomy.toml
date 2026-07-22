@@ -9,3 +9,70 @@ prefix = "bukan:"
 namespaces = ["method", "type", "status", "keyword"]
 status = ["未整理", "要確認", "整理済み"]
 type = ["article", "review", "proceedings", "thesis", "book", "teaching-material"]
+
+# Rules inspect titles, filenames, and existing Paperpile folder names. Keep terms
+# specific enough that every match can be reviewed before it is applied.
+
+[[folder_rules]]
+path = "分野/月惑星科学"
+terms = ["lunar", "moon", "月面", "月の", "かぐや", "selene"]
+
+[[folder_rules]]
+path = "分野/宇宙プラズマ物理"
+terms = ["plasma", "solar wind", "magnetosphere", "帯電", "荷電"]
+
+[[folder_rules]]
+path = "分野/数値計算・データ解析"
+terms = ["simulation", "numerical", "clustering", "解析", "計算", "particle-in-cell"]
+
+[[folder_rules]]
+path = "トピック/月の水・揮発性物質"
+terms = ["lunar water", "moon water", "hydroxyl", "volatile", "月の水", "水資源"]
+
+[[folder_rules]]
+path = "トピック/月面帯電"
+terms = ["surface charging", "electrostatic charging", "月面帯電", "帯電"]
+
+[[folder_rules]]
+path = "トピック/月面ダスト"
+terms = ["lunar dust", "dust transport", "moon dust", "月面ダスト", "月塵"]
+
+[[folder_rules]]
+path = "トピック/太陽風―月相互作用"
+terms = ["solar wind-moon", "solar wind moon", "太陽風", "wake"]
+
+[[folder_rules]]
+path = "ミッション/かぐや（SELENE）"
+terms = ["kaguya", "selene", "かぐや"]
+
+[[label_rules]]
+label = "method:PIC"
+terms = ["particle-in-cell", "particle in cell", "PIC method", "PIC simulation"]
+
+[[label_rules]]
+label = "method:clustering"
+terms = ["clustering", "cluster analysis", "クラスタリング"]
+
+[[label_rules]]
+label = "method:simulation"
+terms = ["simulation", "numerical model", "シミュレーション"]
+
+[[label_rules]]
+label = "method:observation"
+terms = ["observation", "observational", "観測"]
+
+[[label_rules]]
+label = "type:review"
+terms = ["review", "overview", "レビュー", "総説"]
+
+[[label_rules]]
+label = "keyword:lunar-water"
+terms = ["lunar water", "moon water", "hydroxyl", "月の水", "水資源"]
+
+[[label_rules]]
+label = "keyword:surface-charging"
+terms = ["surface charging", "electrostatic charging", "月面帯電"]
+
+[[label_rules]]
+label = "keyword:lunar-dust"
+terms = ["lunar dust", "moon dust", "月面ダスト", "月塵"]

@@ -43,7 +43,27 @@ interface WorkspaceDescriptor {
   paperpileMode: string;
 }
 
+interface OrganizationAssignment {
+  paperId: string;
+  title: string;
+  currentCollections: string[];
+  suggestedFolders: string[];
+  suggestedLabels: string[];
+  evidence: string[];
+  reviewRequired: boolean;
+}
+
+interface OrganizationPlan {
+  taxonomyVersion: number;
+  folderRoot: string;
+  paperCount: number;
+  classifiedCount: number;
+  reviewRequiredCount: number;
+  assignments: OrganizationAssignment[];
+}
+
 type SortMode = "recent" | "title" | "year";
+type MainMode = "library" | "organize";
 
 const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 if (!app) throw new Error("App mount point was not found");
@@ -61,9 +81,12 @@ const state: {
   collection: string | null;
   starredOnly: boolean;
   sort: SortMode;
+  mode: MainMode;
   selectedId: string | null;
   visibleLimit: number;
   error: string | null;
+  organizationPlan: OrganizationPlan | null;
+  organizationLoading: boolean;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -76,9 +99,12 @@ const state: {
   collection: null,
   starredOnly: false,
   sort: "recent",
+  mode: "library",
   selectedId: null,
   visibleLimit: 120,
   error: null,
+  organizationPlan: null,
+  organizationLoading: false,
 };
 
 const icons = {
@@ -211,6 +237,9 @@ function sidebarTemplate(): string {
       <button class="nav-item ${state.starredOnly ? "active" : ""}" data-view="starred">
         <span>${icons.star}スター付き</span><em>${library.stats.starredCount}</em>
       </button>
+      <button class="nav-item organize-nav ${state.mode === "organize" ? "active" : ""}" data-view="organize" title="${state.workspaceRoot ? "Bukan分類候補を確認" : "ワークスペースを開くと利用できます"}">
+        <span>${icons.folder}Bukan 整理</span><em>${state.workspaceRoot ? "→" : "—"}</em>
+      </button>
       <p class="nav-label collections-label">コレクション <em>${library.stats.collectionCount}</em></p>
       <div class="collection-list">
         ${library.collections.map((collection) => `
@@ -313,13 +342,76 @@ function viewerTemplate(): string {
   </section>`;
 }
 
+function organizationTemplate(): string {
+  if (state.organizationLoading) {
+    return `<section class="organization-view organization-loading">
+      <span class="reading-spinner"><i></i><i></i><i></i></span>
+      <h2>分類候補を生成しています</h2>
+      <p>527件のタイトルと既存コレクションを taxonomy.toml のルールと照合しています。</p>
+    </section>`;
+  }
+  const plan = state.organizationPlan;
+  if (!plan) {
+    return `<section class="organization-view organization-loading"><h2>分類計画を読み込めませんでした</h2><p>ワークスペース設定を確認してください。</p></section>`;
+  }
+
+  const folderCounts = new Map<string, number>();
+  plan.assignments.forEach((assignment) => assignment.suggestedFolders.forEach((folder) => {
+    folderCounts.set(folder, (folderCounts.get(folder) ?? 0) + 1);
+  }));
+  const folders = [...folderCounts.entries()].sort((left, right) => right[1] - left[1]);
+  const coverage = plan.paperCount ? Math.round(plan.classifiedCount / plan.paperCount * 100) : 0;
+
+  return `<section class="organization-view">
+    <header class="organization-header">
+      <div><p class="section-kicker">BUKAN ORGANIZER</p><h1>文献の整理計画</h1><p>Paperpileへ適用する前の、根拠付きフォルダ・ラベル候補です。</p></div>
+      <span class="taxonomy-version">taxonomy v${plan.taxonomyVersion}</span>
+    </header>
+    <div class="organization-stats">
+      <article><small>全文献</small><strong>${plan.paperCount}</strong><span>papers</span></article>
+      <article><small>候補あり</small><strong>${plan.classifiedCount}</strong><span>${coverage}% coverage</span></article>
+      <article class="review-stat"><small>手動確認</small><strong>${plan.reviewRequiredCount}</strong><span>自動分類なし</span></article>
+      <article><small>提案フォルダ</small><strong>${folders.length}</strong><span>${escapeHtml(plan.folderRoot)}/ 以下</span></article>
+    </div>
+    <div class="organization-columns">
+      <section class="taxonomy-panel">
+        <div class="organization-section-title"><div><p class="section-kicker">FOLDER MAP</p><h2>${escapeHtml(plan.folderRoot)}/</h2></div><span>${folders.length} folders</span></div>
+        <div class="folder-map">
+          ${folders.map(([folder, count]) => {
+            const relative = folder.startsWith(`${plan.folderRoot}/`) ? folder.slice(plan.folderRoot.length + 1) : folder;
+            const [axis, ...rest] = relative.split("/");
+            return `<div class="folder-map-row"><span>${icons.folder}</span><p><small>${escapeHtml(axis ?? "")}</small><strong>${escapeHtml(rest.join(" / ") || axis || folder)}</strong></p><em>${count}</em></div>`;
+          }).join("")}
+        </div>
+      </section>
+      <section class="assignment-panel">
+        <div class="organization-section-title"><div><p class="section-kicker">REVIEW QUEUE</p><h2>分類候補</h2></div><span>上位 ${Math.min(plan.assignments.length, 120)} 件</span></div>
+        <div class="assignment-list">
+          ${plan.assignments.slice(0, 120).map((assignment) => `
+            <article class="assignment-row ${assignment.reviewRequired ? "needs-review" : ""}">
+              <div class="assignment-title"><span>${assignment.reviewRequired ? "要確認" : "候補"}</span><h3>${escapeHtml(assignment.title)}</h3><small>${escapeHtml(assignment.currentCollections.join(" · ") || "未分類")}</small></div>
+              <div class="suggestion-chips">
+                ${assignment.suggestedFolders.map((folder) => `<i class="folder-chip">${escapeHtml(folder)}</i>`).join("")}
+                ${assignment.suggestedLabels.map((label) => `<i>${escapeHtml(label)}</i>`).join("")}
+              </div>
+              <p class="evidence">${escapeHtml(assignment.evidence.join(" · ") || "分類根拠なし — 手動で確認")}</p>
+            </article>`).join("")}
+        </div>
+      </section>
+    </div>
+  </section>`;
+}
+
 function workspaceTemplate(): string {
   const papers = filteredPapers();
+  const currentTitle = state.mode === "organize"
+    ? "Bukan 整理"
+    : state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers");
   return `<div class="workspace">
     ${sidebarTemplate()}
     <main class="workspace-main">
       <header class="topbar">
-        <div class="breadcrumb"><span>${escapeHtml(state.workspaceName ?? "Paperpile")}</span>${icons.chevron}<strong>${escapeHtml(state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers"))}</strong></div>
+        <div class="breadcrumb"><span>${escapeHtml(state.workspaceName ?? "Paperpile")}</span>${icons.chevron}<strong>${escapeHtml(currentTitle)}</strong></div>
         <div class="topbar-actions">
           ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
@@ -327,7 +419,7 @@ function workspaceTemplate(): string {
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
         </div>
       </header>
-      <div class="content-grid">${paperListTemplate(papers)}${viewerTemplate()}</div>
+      ${state.mode === "organize" ? organizationTemplate() : `<div class="content-grid">${paperListTemplate(papers)}${viewerTemplate()}</div>`}
     </main>
   </div>`;
 }
@@ -357,20 +449,24 @@ function bindEvents(): void {
   document.querySelector<HTMLElement>(".open-workspace")?.addEventListener("click", () => void chooseWorkspace(false));
   document.querySelector<HTMLElement>(".create-workspace")?.addEventListener("click", () => void chooseWorkspace(true));
   document.querySelector<HTMLElement>("[data-view='all']")?.addEventListener("click", () => {
+    state.mode = "library";
     state.collection = null;
     state.starredOnly = false;
     state.visibleLimit = 120;
     render();
   });
   document.querySelector<HTMLElement>("[data-view='starred']")?.addEventListener("click", () => {
+    state.mode = "library";
     state.collection = null;
     state.starredOnly = true;
     state.visibleLimit = 120;
     render();
   });
+  document.querySelector<HTMLElement>("[data-view='organize']")?.addEventListener("click", () => void openOrganization());
   document.querySelectorAll<HTMLElement>("[data-collection]").forEach((element) => {
     element.addEventListener("click", () => {
       state.collection = element.dataset.collection ?? null;
+      state.mode = "library";
       state.starredOnly = false;
       state.visibleLimit = 120;
       render();
@@ -432,6 +528,28 @@ async function runPaperAction(command: "open_paper" | "reveal_paper"): Promise<v
   }
 }
 
+async function openOrganization(): Promise<void> {
+  if (!state.workspaceRoot) {
+    showToast("Bukan整理を使うには、先にワークスペースを開いてください", true);
+    return;
+  }
+  state.mode = "organize";
+  if (state.organizationPlan) {
+    render();
+    return;
+  }
+  state.organizationLoading = true;
+  render();
+  try {
+    state.organizationPlan = await invoke<OrganizationPlan>("suggest_organization", { workspaceRoot: state.workspaceRoot });
+  } catch (error) {
+    showToast(String(error), true);
+  } finally {
+    state.organizationLoading = false;
+    render();
+  }
+}
+
 async function chooseLibrary(): Promise<void> {
   try {
     const selected = await open({ directory: true, multiple: false, title: "Paperpile フォルダを選択" });
@@ -475,6 +593,7 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
   }
   state.workspaceRoot = descriptor.root;
   state.workspaceName = descriptor.name;
+  state.organizationPlan = null;
   localStorage.setItem("bukan.workspaceRoot", descriptor.root);
   await loadLibrary(descriptor.paperpileRoot);
 }

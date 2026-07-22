@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::{DirEntry, WalkDir};
 
+pub mod organization;
 pub mod workspace;
 
 #[derive(Default)]
@@ -99,6 +100,17 @@ fn initialize_workspace(
 #[tauri::command]
 fn open_workspace(root: String) -> Result<workspace::WorkspaceDescriptor, String> {
     workspace::describe_workspace(Path::new(&root))
+}
+
+#[tauri::command]
+fn suggest_organization(workspace_root: String) -> Result<organization::OrganizationPlan, String> {
+    let descriptor = workspace::describe_workspace(Path::new(&workspace_root))?;
+    let paperpile_root = descriptor
+        .paperpile_root
+        .ok_or_else(|| "Paperpileライブラリが見つかりません".to_string())?;
+    let index = build_index(Path::new(&paperpile_root))?;
+    let taxonomy = organization::load_taxonomy(Path::new(&descriptor.root))?;
+    Ok(organization::generate_plan(&index, &taxonomy))
 }
 
 #[tauri::command]
@@ -448,6 +460,7 @@ pub fn run() {
             detect_libraries,
             initialize_workspace,
             open_workspace,
+            suggest_organization,
             scan_library,
             open_paper,
             reveal_paper
