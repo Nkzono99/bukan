@@ -183,7 +183,12 @@ kbd { font: 500 10px/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .drive-status strong { display: block; font-size: 9px; }
 .drive-status small { display: block; color: var(--text-secondary); font-size: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-top: 2px; }
 .drive-status > i { width: 6px; height: 6px; background: var(--success); border-radius: 50%; box-shadow: 0 0 0 3px color-mix(in srgb, var(--success) 14%, transparent); }
-.change-library { border: 0; background: transparent; color: var(--text-secondary); font-size: 8px; padding: 8px 31px 0; cursor: pointer; }
+.workspace-footer-actions { display: flex; align-items: center; gap: 6px; margin-top: 9px; }
+.open-vscode { min-width: 0; height: 28px; padding: 0 7px; display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-primary); font-size: 8px; cursor: pointer; }
+.open-vscode:hover { border-color: var(--accent); color: var(--accent); }
+.open-vscode svg { width: 12px; height: 12px; }
+.open-vscode span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.change-library { border: 0; background: transparent; color: var(--text-secondary); font-size: 8px; padding: 6px; cursor: pointer; white-space: nowrap; }
 .change-library:hover { color: var(--accent); }
 
 .workspace-main { grid-column: 3; grid-row: 1; min-width: 0; min-height: 0; display: grid; grid-template-rows: 48px 1fr; }

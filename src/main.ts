@@ -141,6 +141,7 @@ const icons = {
   panel: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>`,
   list: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".7"/><circle cx="4" cy="12" r=".7"/><circle cx="4" cy="18" r=".7"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.28.58.68.6 1.1v.1h1v4h-.1a1.7 1.7 0 0 0-1.5.8Z"/></svg>`,
+  code: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 4-9.5 8L17 20l3-1.5v-13L17 4Z"/><path d="m7.5 12-4-3v6l4-3Z"/></svg>`,
 };
 
 function resolvedTheme(): "light" | "dark" {
@@ -351,7 +352,10 @@ function sidebarTemplate(): string {
     </nav>
     <div class="sidebar-footer">
       <div class="drive-status"><span>${state.workspaceRoot ? icons.folder : icons.drive}</span><div><strong>${escapeHtml(state.workspaceName ?? "Google Drive")}</strong><small>${escapeHtml(state.workspaceRoot ?? library.root)}</small></div><i></i></div>
-      <button class="change-library" type="button">ライブラリを変更</button>
+      <div class="workspace-footer-actions">
+        ${state.workspaceRoot ? `<button class="open-vscode" type="button">${icons.code}<span>VS Codeで開く</span></button>` : ""}
+        <button class="change-library" type="button">ライブラリを変更</button>
+      </div>
     </div>
   </aside>`;
 }
@@ -380,6 +384,7 @@ function commandPaletteTemplate(): string {
     ["all", icons.library, "すべての文献", "ライブラリ"],
     ["starred", icons.star, "スター付き文献", "ライブラリ"],
     ["organize", icons.folder, "Bukan 整理を開く", "ワークスペース"],
+    ...(state.workspaceRoot ? [["open-vscode", icons.code, "VS Codeでワークスペースを開く", "ワークスペース"]] : []),
     ["toggle-sidebar", icons.panel, state.sidebarCollapsed ? "コレクションを表示" : "コレクションを格納", "表示"],
     ["toggle-list", icons.list, state.listCollapsed ? "論文一覧を表示" : "論文一覧を格納", "表示"],
     ["theme-system", icons.settings, "テーマ: System", "表示"],
@@ -616,6 +621,7 @@ function bindEvents(): void {
     state.listCollapsed = !state.listCollapsed;
     render();
   });
+  document.querySelector<HTMLElement>(".open-vscode")?.addEventListener("click", () => void openWorkspaceInVsCode());
   document.querySelector<HTMLElement>(".command-backdrop")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeCommandPalette();
   });
@@ -772,6 +778,8 @@ function executeCommand(action: string): void {
     render();
   } else if (action === "organize") {
     void openOrganization();
+  } else if (action === "open-vscode") {
+    void openWorkspaceInVsCode();
   } else if (action === "toggle-sidebar") {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     render();
@@ -784,6 +792,19 @@ function executeCommand(action: string): void {
     if (state.library) void loadLibrary(state.library.root, true);
   } else {
     render();
+  }
+}
+
+async function openWorkspaceInVsCode(): Promise<void> {
+  if (!state.workspaceRoot) {
+    showToast("先にBukanワークスペースを開いてください", true);
+    return;
+  }
+  try {
+    await invoke("open_workspace_in_vscode", { workspaceRoot: state.workspaceRoot });
+    showToast("VS Codeでワークスペースを開きました");
+  } catch (error) {
+    showToast(`${String(error)} — VS Codeがインストールされ、vscode:// URLが有効か確認してください`, true);
   }
 }
 

@@ -148,6 +148,30 @@ fn reveal_paper(app: AppHandle, state: State<'_, AppState>, path: String) -> Res
         .map_err(|error| format!("エクスプローラーを開けませんでした: {error}"))
 }
 
+#[tauri::command]
+fn open_workspace_in_vscode(app: AppHandle, workspace_root: String) -> Result<(), String> {
+    let (root, _) = workspace::load_workspace(Path::new(&workspace_root))?;
+    let url = vscode_workspace_url(&root)?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| format!("VS Codeでワークスペースを開けませんでした: {error}"))
+}
+
+fn vscode_workspace_url(root: &Path) -> Result<String, String> {
+    let file_url = tauri::Url::from_directory_path(root)
+        .map_err(|_| "ワークスペースのVS Code URLを作成できませんでした".to_string())?;
+    let suffix = file_url
+        .as_str()
+        .strip_prefix("file://")
+        .ok_or_else(|| "ワークスペースのfile URLを作成できませんでした".to_string())?;
+    let suffix = if suffix.starts_with('/') {
+        suffix.to_string()
+    } else {
+        format!("/{suffix}")
+    };
+    Ok(format!("vscode://file{suffix}"))
+}
+
 fn authorized_paper_path(state: &State<'_, AppState>, requested: &str) -> Result<PathBuf, String> {
     let root = state
         .active_root
@@ -463,7 +487,8 @@ pub fn run() {
             suggest_organization,
             scan_library,
             open_paper,
-            reveal_paper
+            reveal_paper,
+            open_workspace_in_vscode
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bukan");
@@ -509,6 +534,19 @@ mod tests {
         assert_eq!(index.papers[0].collections, vec!["Favorite", "Methods"]);
         assert!(index.papers[0].starred);
         assert_eq!(index.stats.starred_count, 1);
+    }
+
+    #[test]
+    fn creates_encoded_vscode_workspace_url() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let root = temporary.path().join("研究 workspace");
+        fs::create_dir_all(&root).expect("workspace directory");
+
+        let url = vscode_workspace_url(&root).expect("VS Code URL");
+
+        assert!(url.starts_with("vscode://file/"));
+        assert!(url.contains("%20"));
+        assert!(!url.contains(' '));
     }
 
     #[test]

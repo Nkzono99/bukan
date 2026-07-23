@@ -1,0 +1,68 @@
+name: Release desktop app
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify release version
+        shell: pwsh
+        run: |
+          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
+          $tauriVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
+          $cargoMetadata = cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
+          $cargoVersion = ($cargoMetadata.packages | Where-Object { $_.name -eq 'bukan' }).version
+
+          if ($tagVersion -ne $tauriVersion -or $tagVersion -ne $packageVersion -or $tagVersion -ne $cargoVersion) {
+            throw "Tag version $tagVersion must match tauri.conf.json ($tauriVersion), package.json ($packageVersion), and Cargo.toml ($cargoVersion)."
+          }
+
+      - name: Run Rust tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
+
+      - name: Build and publish unsigned installer
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Bukan ${{ github.ref_name }}
+          releaseBody: Windows向けの署名なしNSISインストーラーです。
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: false
+          args: --bundles nsis

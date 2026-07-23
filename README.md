@@ -16,6 +16,7 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - PDF のアプリ内表示、既定アプリでの表示、エクスプローラーでの表示
 - 検出できない場合の手動フォルダ選択
 - 外部ワークスペースの初期化・診断・全件走査
+- 開いている外部ワークスペースを VS Code で起動
 - `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
 
 Paperpile 配下に対する書き込み・移動・削除操作は実装していません。
@@ -65,6 +66,20 @@ npm run desktop:build
 ```
 
 生成物は `src-tauri/target/release/bundle/` に出力されます。
+
+## リリース
+
+`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` の
+バージョンを揃え、同じバージョンの `v` 付きタグを push すると、GitHub Actions が
+Windows 用の署名なし NSIS インストーラーをビルドし、Private GitHub Release へ
+添付します。
+
+```powershell
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。
 
 ## 外部ワークスペース
 
