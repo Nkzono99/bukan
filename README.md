@@ -17,6 +17,8 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - 検出できない場合の手動フォルダ選択
 - 外部ワークスペースの初期化・診断・全件走査
 - 開いている外部ワークスペースを VS Code で起動
+- App内のPTYで生のCodex TUIを起動（Workspace単位、`workspace-write`）
+- Viewerで選択中の文献をCodexの作業コンテキストへ設定
 - `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
 
 Paperpile 配下に対する書き込み・移動・削除操作は実装していません。

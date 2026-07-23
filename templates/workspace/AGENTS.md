@@ -21,3 +21,19 @@
 - Use hierarchical `Bukan/` folders for fields, topics, objects, missions, and projects.
 - Use flat `bukan:` labels for methods, reference types, workflow status, and keywords.
 - Review generated organization suggestions before applying them in Paperpile.
+
+## Bukan and Codex
+
+- Bukan launches Codex with this workspace as its working directory.
+- `BUKAN_PAPERPILE_ROOT` identifies the mounted Paperpile library for read-only
+  library-wide searches. `BUKAN_PAPERPILE_READ_ONLY=true` is a mandatory boundary,
+  not a suggestion.
+- When `.bukan/current-context.md` exists, it identifies the paper currently selected
+  in the Bukan viewer. Read it when the user's request refers to "this paper" or the
+  current paper.
+- A PDF path in `.bukan/current-context.md` is a read-only Paperpile source. It may be
+  inspected, but must never be modified, moved, renamed, or deleted.
+- Save durable paper notes under `notes/`, reproducible searches under `queries/`,
+  and synthesized outputs under `reports/`.
+- Keep temporary extraction and retrieval artifacts in `cache/`; they must remain
+  reproducible from the source PDFs.

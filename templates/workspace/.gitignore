@@ -1,4 +1,5 @@
 cache/
+.bukan/
 data/paperpile.bib
 *.log
 .DS_Store

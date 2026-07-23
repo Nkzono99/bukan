@@ -12,11 +12,13 @@ use tauri_plugin_opener::OpenerExt;
 use walkdir::{DirEntry, WalkDir};
 
 pub mod organization;
+pub mod terminal;
 pub mod workspace;
 
 #[derive(Default)]
 struct AppState {
     active_root: Mutex<Option<PathBuf>>,
+    terminal: terminal::CodexTerminalState,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -157,6 +159,68 @@ fn open_workspace_in_vscode(app: AppHandle, workspace_root: String) -> Result<()
         .map_err(|error| format!("VS Codeでワークスペースを開けませんでした: {error}"))
 }
 
+#[tauri::command]
+fn codex_runtime_status(
+    state: State<'_, AppState>,
+) -> Result<terminal::CodexRuntimeStatus, String> {
+    state.terminal.status()
+}
+
+#[tauri::command]
+fn start_codex_terminal(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    workspace_root: String,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> Result<terminal::CodexRuntimeStatus, String> {
+    state
+        .terminal
+        .start(app, Path::new(&workspace_root), cols, rows)
+}
+
+#[tauri::command]
+fn write_codex_terminal(state: State<'_, AppState>, data: String) -> Result<(), String> {
+    state.terminal.write(&data)
+}
+
+#[tauri::command]
+fn resize_codex_terminal(state: State<'_, AppState>, cols: u16, rows: u16) -> Result<(), String> {
+    state.terminal.resize(cols, rows)
+}
+
+#[tauri::command]
+fn stop_codex_terminal(state: State<'_, AppState>) -> Result<(), String> {
+    state.terminal.stop()
+}
+
+#[tauri::command]
+fn set_codex_paper_context(
+    workspace_root: String,
+    paper_path: String,
+    paper_id: String,
+    title: String,
+    authors: Option<String>,
+    year: Option<u16>,
+    collections: Vec<String>,
+) -> Result<String, String> {
+    terminal::write_current_context(
+        Path::new(&workspace_root),
+        Path::new(&paper_path),
+        &paper_id,
+        &title,
+        authors.as_deref(),
+        year,
+        &collections,
+    )
+    .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn clear_codex_paper_context(workspace_root: String) -> Result<(), String> {
+    terminal::clear_current_context(Path::new(&workspace_root))
+}
+
 fn vscode_workspace_url(root: &Path) -> Result<String, String> {
     let file_url = tauri::Url::from_directory_path(root)
         .map_err(|_| "ワークスペースのVS Code URLを作成できませんでした".to_string())?;
@@ -253,11 +317,10 @@ pub fn detect_paperpile_roots() -> Vec<PathBuf> {
 fn drive_label(path: &Path) -> String {
     #[cfg(target_os = "windows")]
     {
-        return path
-            .components()
+        path.components()
             .next()
             .map(|component| component.as_os_str().to_string_lossy().into_owned())
-            .unwrap_or_else(|| "Drive".to_string());
+            .unwrap_or_else(|| "Drive".to_string())
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -488,7 +551,14 @@ pub fn run() {
             scan_library,
             open_paper,
             reveal_paper,
-            open_workspace_in_vscode
+            open_workspace_in_vscode,
+            codex_runtime_status,
+            start_codex_terminal,
+            write_codex_terminal,
+            resize_codex_terminal,
+            stop_codex_terminal,
+            set_codex_paper_context,
+            clear_codex_paper_context
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bukan");

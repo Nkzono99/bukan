@@ -1,3 +1,31 @@
+## 現在のアプリケーション方針
+
+Bukanを利用者が日常的に触る統合フロントエンド、Paperpileを文献・PDF・引用情報の
+正本として扱う。Paperpile同期フォルダは常に読み取り専用であり、Bukanが生成する
+ノート、検索条件、候補、レポート、インポート一式は外部Workspaceへ保存する。
+
+```text
+Bukan App
+├─ Paperpile Viewer / Collections（read-only）
+├─ Bukan分類候補
+├─ Raw Codex TUI
+└─ Workspace notes / reports / candidates
+```
+
+CodexはBukan独自のチャットUIで包まず、App内のPTY上で生のCodex CLIを起動する。
+作業ディレクトリはGoogle Drive等に置かれたBukan Workspaceで、起動時に
+`workspace-write`サンドボックスと`on-request`承認を指定する。Paperpileフォルダを
+追加の書き込み可能ディレクトリにはしない。
+
+Viewerで選択した論文は`.bukan/current-context.md`を介してCodexへ渡す。このファイル
+には読み取り専用PDFへの参照と文献情報だけを保存し、Git管理しない。将来のRAG/MCP
+実装でも、Paperpileへのアクセス制御とパス検証はRustコアへ集約する。
+
+Paperpile公式APIまたはMCPが一般提供されるまでは、分類・ラベル変更は適用計画と
+インポート候補までに留める。同期フォルダを直接変更する実装は行わない。
+
+---
+
 ## 結論
 
 **Paperpileを文献データの正本、Codexを検索・分析・整理の作業エンジンにする構成**がおすすめです。

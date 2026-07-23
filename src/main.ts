@@ -1,5 +1,9 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { FitAddon } from "@xterm/addon-fit";
+import { Terminal } from "@xterm/xterm";
+import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
 interface LibraryLocation {
@@ -41,6 +45,24 @@ interface WorkspaceDescriptor {
   version: number;
   paperpileRoot: string | null;
   paperpileMode: string;
+}
+
+interface CodexRuntimeStatus {
+  available: boolean;
+  version: string | null;
+  command: string | null;
+  running: boolean;
+  sessionId: number | null;
+  workspaceRoot: string | null;
+}
+
+interface CodexTerminalOutput {
+  sessionId: number;
+  data: string;
+}
+
+interface CodexTerminalExit {
+  sessionId: number;
 }
 
 interface OrganizationAssignment {
@@ -100,6 +122,11 @@ const state: {
   sidebarCollapsed: boolean;
   listCollapsed: boolean;
   commandOpen: boolean;
+  codexOpen: boolean;
+  codexStarting: boolean;
+  codexStatus: CodexRuntimeStatus | null;
+  codexContextPaperId: string | null;
+  codexError: string | null;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -123,6 +150,11 @@ const state: {
   sidebarCollapsed: false,
   listCollapsed: false,
   commandOpen: false,
+  codexOpen: false,
+  codexStarting: false,
+  codexStatus: null,
+  codexContextPaperId: null,
+  codexError: null,
 };
 
 const icons = {
@@ -142,7 +174,18 @@ const icons = {
   list: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r=".7"/><circle cx="4" cy="12" r=".7"/><circle cx="4" cy="18" r=".7"/></svg>`,
   settings: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.28.58.68.6 1.1v.1h1v4h-.1a1.7 1.7 0 0 0-1.5.8Z"/></svg>`,
   code: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 4-9.5 8L17 20l3-1.5v-13L17 4Z"/><path d="m7.5 12-4-3v6l4-3Z"/></svg>`,
+  terminal: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 16h5"/></svg>`,
+  close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>`,
+  context: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/><path d="m17 14 4 2-4 2v-4Z"/></svg>`,
 };
+
+const codexTerminalHost = document.createElement("div");
+codexTerminalHost.className = "codex-terminal-host";
+let codexTerminal: Terminal | null = null;
+let codexFitAddon: FitAddon | null = null;
+let codexResizeObserver: ResizeObserver | null = null;
+let codexResizeTimer: number | null = null;
+let codexBacklog = "";
 
 function resolvedTheme(): "light" | "dark" {
   if (state.theme === "system") return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
@@ -152,6 +195,45 @@ function resolvedTheme(): "light" | "dark" {
 function applyTheme(): void {
   document.documentElement.dataset.theme = resolvedTheme();
   document.documentElement.dataset.themeMode = state.theme;
+  if (codexTerminal) codexTerminal.options.theme = terminalTheme();
+}
+
+function terminalTheme() {
+  return resolvedTheme() === "dark"
+    ? {
+        background: "#0c0d0f",
+        foreground: "#f0f1f3",
+        cursor: "#a5a6ff",
+        cursorAccent: "#0c0d0f",
+        selectionBackground: "#3d3d68",
+        black: "#111214",
+        red: "#e58c8c",
+        green: "#91c7a5",
+        yellow: "#d9be7a",
+        blue: "#8b8cf8",
+        magenta: "#bb9af7",
+        cyan: "#7dcfff",
+        white: "#d8dae0",
+        brightBlack: "#686b73",
+        brightWhite: "#ffffff",
+      }
+    : {
+        background: "#fbfbfa",
+        foreground: "#1c1d20",
+        cursor: "#5b5bd6",
+        cursorAccent: "#ffffff",
+        selectionBackground: "#dadafa",
+        black: "#1c1d20",
+        red: "#a94444",
+        green: "#397852",
+        yellow: "#8a6820",
+        blue: "#4f4fc4",
+        magenta: "#7950a0",
+        cyan: "#27758a",
+        white: "#e3e3e0",
+        brightBlack: "#686b73",
+        brightWhite: "#ffffff",
+      };
 }
 
 function setTheme(theme: ThemeMode): void {
@@ -369,6 +451,7 @@ function railTemplate(): string {
       <button class="rail-button ${state.mode === "library" && !state.starredOnly ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
       <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
       <button class="rail-button ${state.mode === "organize" ? "active" : ""}" type="button" data-rail-action="organize" title="Bukan 整理" aria-label="Bukan 整理">${icons.folder}</button>
+      <button class="rail-button ${state.codexOpen ? "active" : ""}" type="button" data-rail-action="codex" title="Codex（Ctrl+J）" aria-label="Codexを開閉">${icons.terminal}</button>
     </nav>
     <div class="rail-bottom">
       <button class="rail-button" type="button" data-rail-action="command" title="コマンド（Ctrl+K）" aria-label="コマンドパレット">${icons.command}</button>
@@ -384,6 +467,7 @@ function commandPaletteTemplate(): string {
     ["all", icons.library, "すべての文献", "ライブラリ"],
     ["starred", icons.star, "スター付き文献", "ライブラリ"],
     ["organize", icons.folder, "Bukan 整理を開く", "ワークスペース"],
+    ...(state.workspaceRoot ? [["toggle-codex", icons.terminal, state.codexOpen ? "Codexを閉じる" : "Codexを開く", "ワークスペース"]] : []),
     ...(state.workspaceRoot ? [["open-vscode", icons.code, "VS Codeでワークスペースを開く", "ワークスペース"]] : []),
     ["toggle-sidebar", icons.panel, state.sidebarCollapsed ? "コレクションを表示" : "コレクションを格納", "表示"],
     ["toggle-list", icons.list, state.listCollapsed ? "論文一覧を表示" : "論文一覧を格納", "表示"],
@@ -475,6 +559,7 @@ function viewerTemplate(): string {
         <p>${escapeHtml([paper.authors, paper.year?.toString()].filter(Boolean).join(" · ") || paper.fileName)}</p>
       </div>
       <div class="viewer-actions">
+        ${state.workspaceRoot ? `<button class="icon-button set-codex-context ${state.codexContextPaperId === paper.id ? "context-active" : ""}" title="この論文をCodexのコンテキストに設定" aria-label="この論文をCodexのコンテキストに設定">${icons.context}</button>` : ""}
         <button class="icon-button reveal-paper" title="エクスプローラーで表示" aria-label="エクスプローラーで表示">${icons.reveal}</button>
         <button class="action-button open-external">${icons.external}<span>別ウィンドウで開く</span></button>
       </div>
@@ -489,6 +574,66 @@ function viewerTemplate(): string {
       ${pdfContent}
     </div>
   </section>`;
+}
+
+function codexPaneTemplate(): string {
+  const contextPaper = state.library?.papers.find((paper) => paper.id === state.codexContextPaperId);
+  const status = state.codexStatus;
+  const version = status?.version?.replace(/^codex-cli\s*/i, "") ?? "CLI";
+  let body = "";
+
+  if (!state.workspaceRoot) {
+    body = `<div class="codex-empty">
+      <span>${icons.terminal}</span>
+      <h3>Workspaceが必要です</h3>
+      <p>CodexはPaperpileではなく、Bukan Workspaceを作業ディレクトリとして起動します。</p>
+      <button class="secondary-button create-workspace" type="button">Workspaceを初期化</button>
+    </div>`;
+  } else if (state.codexStarting || !status) {
+    body = `<div class="codex-empty">
+      <span class="reading-spinner"><i></i><i></i><i></i></span>
+      <h3>${state.codexStarting ? "Codexを起動しています" : "Codexを確認しています"}</h3>
+      <p>WorkspaceとローカルのCodex CLIを準備しています。</p>
+    </div>`;
+  } else if (!status.available) {
+    body = `<div class="codex-empty">
+      <span>${icons.terminal}</span>
+      <h3>Codex CLIが見つかりません</h3>
+      <p>Codex CLIをインストールすると、ここに生のCodex TUIが表示されます。</p>
+      <code>npm install -g @openai/codex</code>
+      <button class="secondary-button retry-codex" type="button">再確認</button>
+    </div>`;
+  } else if (!status.running) {
+    body = `<div class="codex-empty">
+      <span>${icons.terminal}</span>
+      <h3>Codexセッションは終了しました</h3>
+      <p>${state.codexError ? escapeHtml(state.codexError) : "同じWorkspaceで新しいセッションを開始できます。"}</p>
+      <button class="action-button start-codex" type="button">${icons.terminal}Codexを起動</button>
+    </div>`;
+  } else {
+    body = `<div class="codex-terminal-mount" aria-label="Codex terminal"></div>`;
+  }
+
+  return `<aside class="codex-pane">
+    <header class="codex-header">
+      <div><span class="codex-mark">${icons.terminal}</span><p><strong>Codex</strong><small>${escapeHtml(version)} · raw terminal</small></p></div>
+      <div class="codex-header-actions">
+        ${status?.running ? `<button class="codex-text-button stop-codex" type="button" title="Codexを終了">終了</button>` : ""}
+        <button class="icon-button close-codex" type="button" title="Codexペインを閉じる" aria-label="Codexペインを閉じる">${icons.close}</button>
+      </div>
+    </header>
+    <div class="codex-context-bar">
+      <span>CONTEXT</span>
+      ${contextPaper
+        ? `<button type="button" class="context-chip" title="${escapeHtml(contextPaper.title)}">${icons.context}<i>${escapeHtml(contextPaper.title)}</i></button>`
+        : `<p>Viewerの文献を選び、${icons.context}<span>で対象に設定</span></p>`}
+      ${contextPaper ? `<button class="clear-codex-context" type="button">Clear</button>` : ""}
+    </div>
+    <div class="codex-body">
+      ${state.codexError && status?.running ? `<div class="codex-inline-error">${escapeHtml(state.codexError)}</div>` : ""}
+      <div class="codex-body-content">${body}</div>
+    </div>
+  </aside>`;
 }
 
 function organizationTemplate(): string {
@@ -571,7 +716,9 @@ function workspaceTemplate(): string {
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
         </div>
       </header>
-      ${state.mode === "organize" ? organizationTemplate() : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""}">${paperListTemplate(papers)}${viewerTemplate()}</div>`}
+      ${state.mode === "organize"
+        ? organizationTemplate()
+        : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""} ${state.codexOpen ? "codex-open" : ""}">${paperListTemplate(papers)}${viewerTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`}
     </main>
     ${commandPaletteTemplate()}
   </div>`;
@@ -583,10 +730,12 @@ function loadingTemplate(message = "Google Drive を探しています"): string
 
 function render(): void {
   applyTheme();
+  codexTerminalHost.remove();
   if (state.loading) app.innerHTML = loadingTemplate(state.loadingLabel);
   else if (!state.library) app.innerHTML = onboardingTemplate();
   else app.innerHTML = workspaceTemplate();
   bindEvents();
+  attachCodexTerminal();
 }
 
 function bindEvents(): void {
@@ -605,6 +754,8 @@ function bindEvents(): void {
         focusLibrarySearch();
       } else if (action === "organize") {
         void openOrganization();
+      } else if (action === "codex") {
+        void toggleCodex();
       } else if (action === "command") {
         openCommandPalette();
       } else if (action === "theme") {
@@ -622,6 +773,12 @@ function bindEvents(): void {
     render();
   });
   document.querySelector<HTMLElement>(".open-vscode")?.addEventListener("click", () => void openWorkspaceInVsCode());
+  document.querySelector<HTMLElement>(".close-codex")?.addEventListener("click", () => void toggleCodex(false));
+  document.querySelector<HTMLElement>(".start-codex")?.addEventListener("click", () => void startCodexTerminal());
+  document.querySelector<HTMLElement>(".retry-codex")?.addEventListener("click", () => void refreshCodexStatus(true));
+  document.querySelector<HTMLElement>(".stop-codex")?.addEventListener("click", () => void stopCodexTerminal());
+  document.querySelector<HTMLElement>(".set-codex-context")?.addEventListener("click", () => void setSelectedPaperAsCodexContext());
+  document.querySelector<HTMLElement>(".clear-codex-context")?.addEventListener("click", clearCodexContext);
   document.querySelector<HTMLElement>(".command-backdrop")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeCommandPalette();
   });
@@ -780,6 +937,8 @@ function executeCommand(action: string): void {
     void openOrganization();
   } else if (action === "open-vscode") {
     void openWorkspaceInVsCode();
+  } else if (action === "toggle-codex") {
+    void toggleCodex();
   } else if (action === "toggle-sidebar") {
     state.sidebarCollapsed = !state.sidebarCollapsed;
     render();
@@ -793,6 +952,216 @@ function executeCommand(action: string): void {
   } else {
     render();
   }
+}
+
+function ensureCodexTerminal(): void {
+  if (codexTerminal) return;
+  codexTerminal = new Terminal({
+    cursorBlink: true,
+    cursorStyle: "bar",
+    fontFamily: '"Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace',
+    fontSize: 12,
+    lineHeight: 1.25,
+    letterSpacing: 0,
+    scrollback: 12_000,
+    allowProposedApi: false,
+    theme: terminalTheme(),
+  });
+  codexFitAddon = new FitAddon();
+  codexTerminal.loadAddon(codexFitAddon);
+  codexTerminal.open(codexTerminalHost);
+  codexTerminal.onData((data) => {
+    if (!state.codexStatus?.running) return;
+    void invoke("write_codex_terminal", { data }).catch((error) => {
+      state.codexError = String(error);
+      showToast(state.codexError, true);
+    });
+  });
+  if (codexBacklog) {
+    codexTerminal.write(codexBacklog);
+    codexBacklog = "";
+  }
+}
+
+function attachCodexTerminal(): void {
+  const mount = document.querySelector<HTMLElement>(".codex-terminal-mount");
+  if (!mount || !state.codexOpen || !state.codexStatus?.running) return;
+  mount.append(codexTerminalHost);
+  ensureCodexTerminal();
+  codexResizeObserver?.disconnect();
+  codexResizeObserver = new ResizeObserver(() => scheduleCodexResize());
+  codexResizeObserver.observe(mount);
+  window.requestAnimationFrame(() => {
+    fitAndResizeCodex();
+    codexTerminal?.focus();
+  });
+}
+
+function scheduleCodexResize(): void {
+  if (codexResizeTimer !== null) window.clearTimeout(codexResizeTimer);
+  codexResizeTimer = window.setTimeout(() => {
+    codexResizeTimer = null;
+    fitAndResizeCodex();
+  }, 80);
+}
+
+function fitAndResizeCodex(): void {
+  if (!state.codexStatus?.running || !codexTerminalHost.isConnected) return;
+  try {
+    codexFitAddon?.fit();
+    if (codexTerminal) {
+      void invoke("resize_codex_terminal", {
+        cols: codexTerminal.cols,
+        rows: codexTerminal.rows,
+      }).catch(() => undefined);
+    }
+  } catch {
+    // The pane can be between layouts while the terminal is being moved.
+  }
+}
+
+async function setupCodexEventListeners(): Promise<void> {
+  if (!("__TAURI_INTERNALS__" in window)) return;
+  await listen<CodexTerminalOutput>("codex-terminal-output", ({ payload }) => {
+    if (state.codexStatus?.sessionId && payload.sessionId !== state.codexStatus.sessionId) return;
+    if (codexTerminal) {
+      codexTerminal.write(payload.data);
+    } else {
+      codexBacklog = `${codexBacklog}${payload.data}`.slice(-4_000_000);
+    }
+  });
+  await listen<CodexTerminalExit>("codex-terminal-exit", ({ payload }) => {
+    if (state.codexStatus?.sessionId !== payload.sessionId) return;
+    state.codexStatus = {
+      ...state.codexStatus,
+      running: false,
+      sessionId: null,
+      workspaceRoot: null,
+    };
+    render();
+  });
+}
+
+async function refreshCodexStatus(showErrors = false): Promise<CodexRuntimeStatus | null> {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    state.codexStatus = {
+      available: false,
+      version: null,
+      command: null,
+      running: false,
+      sessionId: null,
+      workspaceRoot: null,
+    };
+    render();
+    return state.codexStatus;
+  }
+  try {
+    state.codexError = null;
+    state.codexStatus = await invoke<CodexRuntimeStatus>("codex_runtime_status");
+    render();
+    return state.codexStatus;
+  } catch (error) {
+    state.codexError = String(error);
+    if (showErrors) showToast(state.codexError, true);
+    render();
+    return null;
+  }
+}
+
+async function toggleCodex(force?: boolean): Promise<void> {
+  const next = force ?? !state.codexOpen;
+  if (next && !state.workspaceRoot) {
+    showToast("Codexを使うには、先にBukanワークスペースを開いてください", true);
+    return;
+  }
+  state.codexOpen = next;
+  if (!next) {
+    codexResizeObserver?.disconnect();
+    render();
+    return;
+  }
+  state.mode = "library";
+  state.listCollapsed = true;
+  render();
+  const status = await refreshCodexStatus();
+  if (status?.available && !status.running) await startCodexTerminal();
+}
+
+async function startCodexTerminal(): Promise<void> {
+  if (!state.workspaceRoot || state.codexStarting) return;
+  state.codexOpen = true;
+  state.codexStarting = true;
+  state.codexError = null;
+  codexBacklog = "";
+  codexTerminal?.reset();
+  render();
+  try {
+    state.codexStatus = await invoke<CodexRuntimeStatus>("start_codex_terminal", {
+      workspaceRoot: state.workspaceRoot,
+      cols: codexTerminal?.cols ?? 110,
+      rows: codexTerminal?.rows ?? 32,
+    });
+  } catch (error) {
+    state.codexError = String(error);
+    state.codexStatus = {
+      available: !state.codexError.includes("見つかりません"),
+      version: null,
+      command: null,
+      running: false,
+      sessionId: null,
+      workspaceRoot: null,
+    };
+    showToast(state.codexError, true);
+  } finally {
+    state.codexStarting = false;
+    render();
+  }
+}
+
+async function stopCodexTerminal(): Promise<void> {
+  try {
+    await invoke("stop_codex_terminal");
+    if (state.codexStatus) {
+      state.codexStatus.running = false;
+      state.codexStatus.sessionId = null;
+      state.codexStatus.workspaceRoot = null;
+    }
+    render();
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
+async function setSelectedPaperAsCodexContext(): Promise<void> {
+  const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
+  if (!paper || !state.workspaceRoot) return;
+  try {
+    await invoke<string>("set_codex_paper_context", {
+      workspaceRoot: state.workspaceRoot,
+      paperPath: paper.path,
+      paperId: paper.id,
+      title: paper.title,
+      authors: paper.authors,
+      year: paper.year,
+      collections: paper.collections,
+    });
+    state.codexContextPaperId = paper.id;
+    showToast("現在の論文をCodexコンテキストに設定しました");
+    if (!state.codexOpen) await toggleCodex(true);
+    else render();
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
+function clearCodexContext(): void {
+  if (!state.workspaceRoot) return;
+  void invoke("clear_codex_paper_context", { workspaceRoot: state.workspaceRoot })
+    .then(() => {
+      state.codexContextPaperId = null;
+      render();
+    })
+    .catch((error) => showToast(String(error), true));
 }
 
 async function openWorkspaceInVsCode(): Promise<void> {
@@ -844,8 +1213,12 @@ async function chooseLibrary(): Promise<void> {
   try {
     const selected = await open({ directory: true, multiple: false, title: "Paperpile フォルダを選択" });
     if (selected) {
+      if (state.codexStatus?.running) await invoke("stop_codex_terminal");
       state.workspaceRoot = null;
       state.workspaceName = null;
+      state.codexOpen = false;
+      state.codexStatus = null;
+      state.codexContextPaperId = null;
       localStorage.removeItem("bukan.workspaceRoot");
       await loadLibrary(selected);
     }
@@ -881,9 +1254,14 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
   if (!descriptor.paperpileRoot) {
     throw new Error("マウント済みの Paperpile が見つかりません。bukan.toml の paperpile.path を確認してください。");
   }
+  if (state.workspaceRoot && state.workspaceRoot !== descriptor.root && state.codexStatus?.running) {
+    await invoke("stop_codex_terminal");
+  }
   state.workspaceRoot = descriptor.root;
   state.workspaceName = descriptor.name;
   state.organizationPlan = null;
+  state.codexStatus = null;
+  state.codexContextPaperId = null;
   localStorage.setItem("bukan.workspaceRoot", descriptor.root);
   await loadLibrary(descriptor.paperpileRoot);
 }
@@ -972,6 +1350,7 @@ function demoLibrary(): LibraryIndex {
 
 async function initialize(): Promise<void> {
   applyTheme();
+  await setupCodexEventListeners();
   if (isDemoMode) {
     state.library = demoLibrary();
     state.loading = false;
@@ -1010,7 +1389,8 @@ async function initialize(): Promise<void> {
 window.addEventListener("keydown", (event) => {
   const target = event.target as HTMLElement | null;
   const isTyping = target?.matches("input, textarea, select, [contenteditable='true']") ?? false;
-  if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "k") {
+  if (target?.closest(".xterm")) return;
+  if ((event.ctrlKey || event.metaKey) && !event.shiftKey && event.key.toLocaleLowerCase() === "k") {
     event.preventDefault();
     if (state.commandOpen) closeCommandPalette();
     else openCommandPalette();
@@ -1024,6 +1404,12 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     state.sidebarCollapsed = !state.sidebarCollapsed;
     render();
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "j" && state.library) {
+    event.preventDefault();
+    void toggleCodex();
+  } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLocaleLowerCase() === "k" && state.selectedId) {
+    event.preventDefault();
+    void setSelectedPaperAsCodexContext();
   }
 });
 

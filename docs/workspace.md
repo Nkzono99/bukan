@@ -14,6 +14,7 @@ my-research/
 ├── candidates/            # Paperpileへ未登録の候補
 ├── reports/               # 検索レポートとエビデンス表
 ├── imports/               # Paperpileへ戻すファイル
+├── .bukan/                # ViewerとCodexの一時コンテキスト（Git対象外）
 └── cache/                 # 再生成可能な索引・抽出テキスト（Git対象外）
 ```
 
@@ -23,6 +24,21 @@ my-research/
 - 絶対パスを指定すれば、ワークスペース単位で異なる同期先を使用できます。
 - Paperpile の同期フォルダは常に読み取り専用です。
 - PDFを移動・改名せず、タグ提案・ノート・分析結果だけをワークスペースへ保存します。
+
+## Codexターミナル
+
+Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしてCodex CLIを
+PTY上で起動します。表示されるのはCodexの生のTUIであり、Bukan独自のチャットUIへ
+変換しません。
+
+起動時は `workspace-write` サンドボックスと `on-request` 承認を明示します。
+Paperpile同期フォルダを追加の書き込み可能ディレクトリには設定しません。
+読み取り元は`BUKAN_PAPERPILE_ROOT`、読み取り専用境界は
+`BUKAN_PAPERPILE_READ_ONLY=true`としてCodexプロセスへ渡します。
+
+Viewerから文献をCodexコンテキストへ設定すると、
+`.bukan/current-context.md` に現在の文献ID、タイトル、コレクション、読み取り専用PDF
+への参照が保存されます。このファイルはセッション用で、Gitには含めません。
 
 ## 整理モデル
 
