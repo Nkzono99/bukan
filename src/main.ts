@@ -14,6 +14,8 @@ interface LibraryLocation {
 
 interface PaperRecord {
   id: string;
+  legacyId?: string;
+  identitySource?: string;
   title: string;
   authors: string | null;
   year: number | null;
@@ -73,6 +75,7 @@ interface PresentedPaperList {
 }
 
 interface PresentedPaper {
+  paperId?: string;
   title: string;
   authors: string;
   year: number | null;
@@ -80,6 +83,12 @@ interface PresentedPaper {
   url: string;
   note: string;
   status: string;
+}
+
+interface LibraryChangeToken {
+  token: string;
+  paperCount: number;
+  checkedAt: number;
 }
 
 interface OrganizationAssignment {
@@ -147,6 +156,8 @@ const state: {
   codexPaperList: PresentedPaperList | null;
   codexPaperListVisible: boolean;
   codexPaperListSelection: number;
+  libraryChangeToken: string | null;
+  libraryLastCheckedAt: number | null;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -178,6 +189,8 @@ const state: {
   codexPaperList: null,
   codexPaperListVisible: false,
   codexPaperListSelection: 0,
+  libraryChangeToken: null,
+  libraryLastCheckedAt: null,
 };
 
 const icons = {
@@ -607,6 +620,12 @@ function normalizedPaperTitle(title: string): string {
 }
 
 function matchingLibraryPaper(paper: PresentedPaper): PaperRecord | null {
+  if (paper.paperId) {
+    const byId = state.library?.papers.find((candidate) =>
+      candidate.id === paper.paperId || candidate.legacyId === paper.paperId
+    );
+    if (byId) return byId;
+  }
   const normalized = normalizedPaperTitle(paper.title);
   return state.library?.papers.find((candidate) => normalizedPaperTitle(candidate.title) === normalized) ?? null;
 }
@@ -622,6 +641,8 @@ function codexPaperListTemplate(): string {
         <p>${list.papers.length} papers · 一時リスト</p>
       </div>
       <div class="viewer-actions">
+        <button class="codex-text-button persist-codex-paper-list" data-list-destination="reports" type="button">レポート保存</button>
+        <button class="codex-text-button persist-codex-paper-list" data-list-destination="candidates" type="button">候補化</button>
         <button class="codex-text-button clear-codex-paper-list" type="button">消去</button>
         <button class="icon-button close-codex-paper-list" type="button" title="PDFへ戻る" aria-label="PDFへ戻る">${icons.close}</button>
       </div>
@@ -781,6 +802,7 @@ function workspaceTemplate(): string {
         <div class="topbar-actions">
           ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
+          ${!state.scanning && state.libraryLastCheckedAt ? `<span class="watch-status"><i></i>Paperpile 監視中</span>` : ""}
           ${state.library?.warnings.length ? `<span class="warning-count" title="読み込めなかったファイルがあります">${state.library.warnings.length} warnings</span>` : ""}
           ${state.codexPaperList ? `<button class="codex-list-badge" type="button">${icons.terminal}<span>${escapeHtml(state.codexPaperList.title)}</span><em>${state.codexPaperList.papers.length}</em></button>` : ""}
           <button class="command-trigger" type="button">${icons.search}<span>検索とコマンド</span><kbd>Ctrl K</kbd></button>
@@ -863,6 +885,11 @@ function bindEvents(): void {
     render();
   });
   document.querySelector<HTMLElement>(".clear-codex-paper-list")?.addEventListener("click", () => void clearCodexPaperList());
+  document.querySelectorAll<HTMLElement>(".persist-codex-paper-list").forEach((element) => {
+    element.addEventListener("click", () => {
+      void persistCodexPaperList(element.dataset.listDestination ?? "");
+    });
+  });
   document.querySelectorAll<HTMLElement>("[data-codex-paper-index]").forEach((element) => {
     element.addEventListener("click", () => {
       state.codexPaperListSelection = Number(element.dataset.codexPaperIndex ?? 0);
@@ -1269,6 +1296,19 @@ async function clearCodexPaperList(): Promise<void> {
   }
 }
 
+async function persistCodexPaperList(destination: string): Promise<void> {
+  if (!state.workspaceRoot || !state.codexPaperList) return;
+  try {
+    const path = await invoke<string>("persist_codex_paper_list", {
+      workspaceRoot: state.workspaceRoot,
+      destination,
+    });
+    showToast(`${destination === "reports" ? "レポート" : "候補リスト"}へ保存しました · ${path}`);
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
 async function setSelectedPaperAsCodexContext(): Promise<void> {
   const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
   if (!paper || !state.workspaceRoot) return;
@@ -1358,6 +1398,8 @@ async function chooseLibrary(): Promise<void> {
       state.codexContextPaperId = null;
       state.codexPaperList = null;
       state.codexPaperListVisible = false;
+      state.libraryChangeToken = null;
+      state.libraryLastCheckedAt = null;
       localStorage.removeItem("bukan.workspaceRoot");
       await loadLibrary(selected);
     }
@@ -1403,12 +1445,15 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
   state.codexContextPaperId = null;
   state.codexPaperList = null;
   state.codexPaperListVisible = false;
+  state.libraryChangeToken = null;
+  state.libraryLastCheckedAt = null;
   localStorage.setItem("bukan.workspaceRoot", descriptor.root);
   await loadLibrary(descriptor.paperpileRoot);
 }
 
 async function loadLibrary(root: string, quiet = false): Promise<void> {
   if (!root) return;
+  const previous = state.library?.root === root ? state.library : null;
   state.error = null;
   if (quiet) {
     state.scanning = true;
@@ -1423,7 +1468,17 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
     state.library = index;
     state.selectedId = state.selectedId && index.papers.some((paper) => paper.id === state.selectedId) ? state.selectedId : null;
     localStorage.setItem("bukan.paperpileRoot", index.root);
-    if (quiet) showToast(`${index.stats.paperCount} 件の文献を更新しました`);
+    if (quiet) {
+      const previousIds = new Set(previous?.papers.map((paper) => paper.id) ?? []);
+      const nextIds = new Set(index.papers.map((paper) => paper.id));
+      const added = index.papers.filter((paper) => !previousIds.has(paper.id)).length;
+      const removed = (previous?.papers ?? []).filter((paper) => !nextIds.has(paper.id)).length;
+      const changes = [
+        added ? `追加 ${added}` : "",
+        removed ? `削除 ${removed}` : "",
+      ].filter(Boolean).join(" / ");
+      showToast(changes ? `Paperpile更新 · ${changes} · 全${index.stats.paperCount}件` : `${index.stats.paperCount}件を再読込しました`);
+    }
   } catch (error) {
     state.error = String(error);
     if (!quiet) state.library = null;
@@ -1431,6 +1486,40 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
     state.loading = false;
     state.scanning = false;
     render();
+    window.setTimeout(() => void refreshLibraryChangeToken(), 0);
+  }
+}
+
+let libraryChangePolling = false;
+
+async function refreshLibraryChangeToken(): Promise<void> {
+  if (
+    !("__TAURI_INTERNALS__" in window)
+    || !state.library
+    || state.scanning
+    || state.loading
+    || libraryChangePolling
+  ) return;
+
+  libraryChangePolling = true;
+  try {
+    const root = state.library.root;
+    const result = await invoke<LibraryChangeToken>("library_change_token", { root });
+    const previousToken = state.libraryChangeToken;
+    state.libraryLastCheckedAt = result.checkedAt;
+    state.libraryChangeToken = result.token;
+    if (previousToken && previousToken !== result.token && state.library?.root === root) {
+      await loadLibrary(root, true);
+      const refreshed = await invoke<LibraryChangeToken>("library_change_token", { root });
+      state.libraryChangeToken = refreshed.token;
+      state.libraryLastCheckedAt = refreshed.checkedAt;
+    } else if (!previousToken) {
+      render();
+    }
+  } catch (error) {
+    console.warn("Could not monitor Paperpile changes", error);
+  } finally {
+    libraryChangePolling = false;
   }
 }
 
@@ -1559,5 +1648,6 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 });
 
 window.setInterval(() => void refreshCodexPaperList(), 1200);
+window.setInterval(() => void refreshLibraryChangeToken(), 30000);
 
 void initialize();

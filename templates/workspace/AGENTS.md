@@ -40,3 +40,9 @@
 - When a search, comparison, or collection task produces a useful paper list, call
   the Bukan MCP `present_paper_list` tool so the user can review it beside the raw
   Codex terminal. This list is temporary and is not a Paperpile write.
+- Prefer the Bukan MCP `search_library`, `list_collections`, `get_paper`, and
+  `get_current_paper` tools over scanning the Paperpile directory manually. These
+  tools expose the same read-only index used by the Viewer.
+- The user may explicitly save a presented list from the Viewer. Saved reports go
+  under `reports/codex-lists/`; candidate sets go under `candidates/codex-lists/`.
+  Neither destination is inside Paperpile.

@@ -41,10 +41,17 @@ Viewerから文献をCodexコンテキストへ設定すると、
 への参照が保存されます。このファイルはセッション用で、Gitには含めません。
 
 Codex起動時にはBukan自身がstdio MCPサーバーとしてセッション限定で登録されます。
+`search_library`、`list_collections`、`get_paper`、`get_current_paper`は、
+Viewerと同じ索引を読み取り専用で参照します。書誌ファイル名とサイズに基づく
+安定IDを返すため、Paperpile側でコレクションが変わっても同じPDFを追跡できます。
+索引作成時にPDF本文は開かず、Google Driveのオンデマンドファイルを実体化しません。
+
 Codexは`present_paper_list`を呼び、検索・比較・選定した文献を構造化リストとして
 Viewerへ表示できます。リストは`%LOCALAPPDATA%\Bukan\bridge\`の一時状態であり、
-PaperpileおよびGoogle Drive Workspaceには書き込みません。`clear_paper_list`または
-GUIの「消去」で削除できます。
+PaperpileおよびGoogle Drive Workspaceには自動で書き込みません。`clear_paper_list`
+またはGUIの「消去」で削除できます。利用者が保存ボタンを押した場合だけ、
+Markdownレポートを`reports/codex-lists/`、JSON候補を
+`candidates/codex-lists/`へ新規ファイルとして保存します。
 
 ## 整理モデル
 

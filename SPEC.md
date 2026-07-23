@@ -22,9 +22,17 @@ Viewerで選択した論文は`.bukan/current-context.md`を介してCodexへ渡
 実装でも、Paperpileへのアクセス制御とパス検証はRustコアへ集約する。
 
 Codexが検索・比較・収集した文献リストは、Bukan MCPの`present_paper_list`でGUIへ
-一時表示できる。リストはローカルブリッジだけに保持し、自動的にPaperpileや
-Workspaceへ永続化しない。これにより専用RAG索引を必須にせず、生のCodexを検索・
-選定エンジンとして使いながら、結果確認だけをViewerで行える。
+一時表示できる。リストは初期状態ではローカルブリッジだけに保持し、自動的に
+PaperpileやWorkspaceへ永続化しない。利用者がViewerで明示した場合に限り、
+`reports/codex-lists/`または`candidates/codex-lists/`へ保存する。これにより専用RAG
+索引を必須にせず、生のCodexを検索・選定エンジンとして使いながら、結果確認と
+採用判断をViewerで行える。
+
+Bukan MCPは`search_library`、`list_collections`、`get_paper`、
+`get_current_paper`を読み取り専用で提供する。ViewerとMCPはRustコアの同じ索引を
+使用し、書誌ファイル名とサイズに基づく安定IDで同一文献を参照する。索引作成時に
+PDF本文を開かず、Google Driveのオンデマンドファイルを不要に実体化しない。
+Paperpileの同期領域へ書き込むMCPツールは提供しない。
 
 Paperpile公式APIまたはMCPが一般提供されるまでは、分類・ラベル変更は適用計画と
 インポート候補までに留める。同期フォルダを直接変更する実装は行わない。

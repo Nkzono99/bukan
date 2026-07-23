@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::workspace;
+use crate::{build_index, workspace, LibraryIndex, PaperRecord};
 
 const MAX_PAPERS: usize = 250;
 const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -25,6 +25,8 @@ pub struct PresentedPaperList {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PresentedPaper {
+    #[serde(default)]
+    pub paper_id: String,
     pub title: String,
     #[serde(default)]
     pub authors: String,
@@ -46,6 +48,23 @@ struct PresentPaperListInput {
     #[serde(default)]
     description: String,
     papers: Vec<PresentedPaper>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchLibraryInput {
+    #[serde(default)]
+    query: String,
+    #[serde(default)]
+    collection: String,
+    year_from: Option<u16>,
+    year_to: Option<u16>,
+    #[serde(default = "default_search_limit")]
+    limit: usize,
+}
+
+fn default_search_limit() -> usize {
+    50
 }
 
 pub fn run_stdio_from_environment() -> Result<(), String> {
@@ -155,6 +174,56 @@ fn call_tool(workspace_root: &Path, params: &Value) -> Result<Value, String> {
             clear_presented_list(workspace_root)?;
             Ok(tool_text("Bukan GUIの一時文献リストを消去しました。"))
         }
+        "search_library" => {
+            let input: SearchLibraryInput = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid library search: {error}"))?;
+            let index = workspace_index(workspace_root)?;
+            let papers = search_index(&index, &input);
+            Ok(tool_json(json!({
+                "query": input.query,
+                "collection": input.collection,
+                "count": papers.len(),
+                "papers": papers,
+            }))?)
+        }
+        "list_collections" => {
+            let index = workspace_index(workspace_root)?;
+            let collections = index
+                .collections
+                .iter()
+                .map(|collection| {
+                    let count = index
+                        .papers
+                        .iter()
+                        .filter(|paper| paper.collections.iter().any(|item| item == collection))
+                        .count();
+                    json!({ "path": collection, "paperCount": count })
+                })
+                .collect::<Vec<_>>();
+            Ok(tool_json(json!({ "collections": collections }))?)
+        }
+        "get_paper" => {
+            let id = arguments
+                .get("paperId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "paperId is required".to_string())?;
+            let index = workspace_index(workspace_root)?;
+            let paper = index
+                .papers
+                .iter()
+                .find(|paper| paper.id == id || paper.legacy_id == id)
+                .ok_or_else(|| format!("paper not found: {id}"))?;
+            Ok(tool_json(paper)?)
+        }
+        "get_current_paper" => {
+            let context_path = workspace_root.join(".bukan").join("current-context.md");
+            if !context_path.is_file() {
+                return Err("Bukan Viewerで現在の論文が設定されていません".to_string());
+            }
+            let context = fs::read_to_string(context_path)
+                .map_err(|error| format!("could not read current context: {error}"))?;
+            Ok(tool_text(context))
+        }
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -180,6 +249,7 @@ fn tool_definitions() -> Vec<Value> {
                             "additionalProperties": false,
                             "required": ["title"],
                             "properties": {
+                                "paperId": { "type": "string", "maxLength": 200, "description": "Stable or legacy Bukan paper ID when this item already exists in the local library." },
                                 "title": { "type": "string", "minLength": 1, "maxLength": 500 },
                                 "authors": { "type": "string", "maxLength": 500 },
                                 "year": { "type": ["integer", "null"], "minimum": 1500, "maximum": 2200 },
@@ -203,7 +273,98 @@ fn tool_definitions() -> Vec<Value> {
                 "properties": {}
             }
         }),
+        json!({
+            "name": "search_library",
+            "title": "Search the Paperpile library",
+            "description": "Search the mounted Paperpile library read-only by title, author, year, filename, or collection. Returns stable Bukan paper IDs and source paths. Use this before scanning the filesystem manually.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                    "query": { "type": "string", "maxLength": 500 },
+                    "collection": { "type": "string", "maxLength": 500 },
+                    "yearFrom": { "type": ["integer", "null"], "minimum": 1500, "maximum": 2200 },
+                    "yearTo": { "type": ["integer", "null"], "minimum": 1500, "maximum": 2200 },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 200, "default": 50 }
+                }
+            }
+        }),
+        json!({
+            "name": "list_collections",
+            "title": "List Paperpile collections",
+            "description": "List the current read-only Paperpile collection tree paths and paper counts.",
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+        }),
+        json!({
+            "name": "get_paper",
+            "title": "Get paper metadata",
+            "description": "Get metadata and the read-only PDF path for a paper by stable or legacy Bukan paper ID.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["paperId"],
+                "properties": { "paperId": { "type": "string", "minLength": 1, "maxLength": 200 } }
+            }
+        }),
+        json!({
+            "name": "get_current_paper",
+            "title": "Get the current Bukan paper",
+            "description": "Read the paper context currently selected in the Bukan Viewer.",
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+        }),
     ]
+}
+
+fn workspace_index(workspace_root: &Path) -> Result<LibraryIndex, String> {
+    let (workspace_root, config) = workspace::load_workspace(workspace_root)?;
+    let paperpile_root = workspace::resolve_paperpile_root(&workspace_root, &config)?
+        .ok_or_else(|| "Paperpile library was not detected".to_string())?;
+    build_index(&paperpile_root)
+}
+
+fn search_index<'a>(index: &'a LibraryIndex, input: &SearchLibraryInput) -> Vec<&'a PaperRecord> {
+    let terms = input
+        .query
+        .to_lowercase()
+        .split_whitespace()
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let collection = input.collection.trim().to_lowercase();
+    index
+        .papers
+        .iter()
+        .filter(|paper| {
+            if let Some(year_from) = input.year_from {
+                if paper.year.unwrap_or(0) < year_from {
+                    return false;
+                }
+            }
+            if let Some(year_to) = input.year_to {
+                if paper.year.unwrap_or(u16::MAX) > year_to {
+                    return false;
+                }
+            }
+            if !collection.is_empty()
+                && !paper
+                    .collections
+                    .iter()
+                    .any(|item| item.to_lowercase().contains(&collection))
+            {
+                return false;
+            }
+            let haystack = format!(
+                "{} {} {} {} {}",
+                paper.title,
+                paper.authors.as_deref().unwrap_or_default(),
+                paper.year.map(|year| year.to_string()).unwrap_or_default(),
+                paper.file_name,
+                paper.collections.join(" ")
+            )
+            .to_lowercase();
+            terms.iter().all(|term| haystack.contains(term))
+        })
+        .take(input.limit.clamp(1, 200))
+        .collect()
 }
 
 fn validate_list(input: PresentPaperListInput) -> Result<PresentedPaperList, String> {
@@ -244,6 +405,12 @@ fn tool_text(text: impl Into<String>) -> Value {
         "content": [{ "type": "text", "text": text.into() }],
         "isError": false
     })
+}
+
+fn tool_json(value: impl Serialize) -> Result<Value, String> {
+    let text = serde_json::to_string_pretty(&value)
+        .map_err(|error| format!("could not encode tool result: {error}"))?;
+    Ok(tool_text(text))
 }
 
 fn write_response(stdout: &mut impl Write, response: &Value) -> Result<(), String> {
@@ -291,6 +458,106 @@ pub fn clear_presented_list(workspace_root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+pub fn persist_presented_list(workspace_root: &Path, destination: &str) -> Result<PathBuf, String> {
+    let (workspace_root, _) = workspace::load_workspace(workspace_root)?;
+    let list = read_presented_list(&workspace_root)?
+        .ok_or_else(|| "保存する一時文献リストがありません".to_string())?;
+    let (directory, extension, contents) = match destination {
+        "reports" => (
+            workspace_root.join("reports").join("codex-lists"),
+            "md",
+            presented_list_markdown(&list).into_bytes(),
+        ),
+        "candidates" => (
+            workspace_root.join("candidates").join("codex-lists"),
+            "json",
+            serde_json::to_vec_pretty(&list)
+                .map_err(|error| format!("候補リストを変換できませんでした: {error}"))?,
+        ),
+        _ => return Err("保存先は reports または candidates を指定してください".to_string()),
+    };
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("リストの保存先を作成できませんでした: {error}"))?;
+    let slug = filename_slug(&list.title);
+    let slug = if slug.is_empty() { "paper-list" } else { &slug };
+    let stem = format!("{}-{slug}", list.updated_at);
+    for suffix in 0..100 {
+        let suffix = if suffix == 0 {
+            String::new()
+        } else {
+            format!("-{suffix}")
+        };
+        let path = directory.join(format!("{stem}{suffix}.{extension}"));
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                file.write_all(&contents)
+                    .map_err(|error| format!("リストを保存できませんでした: {error}"))?;
+                return Ok(path);
+            }
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("リストを保存できませんでした: {error}")),
+        }
+    }
+    Err("重複しないリスト名を作成できませんでした".to_string())
+}
+
+fn presented_list_markdown(list: &PresentedPaperList) -> String {
+    let mut output = format!(
+        "# {}\n\n{}\n\n- Generated by: Codex via Bukan MCP\n- Papers: {}\n\n",
+        list.title,
+        list.description,
+        list.papers.len()
+    );
+    for (index, paper) in list.papers.iter().enumerate() {
+        output.push_str(&format!("## {}. {}\n\n", index + 1, paper.title));
+        if !paper.paper_id.is_empty() {
+            output.push_str(&format!("- Bukan ID: {}\n", paper.paper_id));
+        }
+        if !paper.authors.is_empty() {
+            output.push_str(&format!("- Authors: {}\n", paper.authors));
+        }
+        if let Some(year) = paper.year {
+            output.push_str(&format!("- Year: {year}\n"));
+        }
+        if !paper.doi.is_empty() {
+            output.push_str(&format!("- DOI: {}\n", paper.doi));
+        }
+        if !paper.url.is_empty() {
+            output.push_str(&format!("- URL: {}\n", paper.url));
+        }
+        if !paper.status.is_empty() {
+            output.push_str(&format!("- Status: {}\n", paper.status));
+        }
+        if !paper.note.is_empty() {
+            output.push_str(&format!("\n{}\n", paper.note));
+        }
+        output.push('\n');
+    }
+    output
+}
+
+fn filename_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut previous_separator = false;
+    for character in value.chars() {
+        if character.is_alphanumeric() {
+            slug.push(character);
+            previous_separator = false;
+        } else if !previous_separator && !slug.is_empty() {
+            slug.push('-');
+            previous_separator = true;
+        }
+        if slug.chars().count() >= 48 {
+            break;
+        }
+    }
+    slug.trim_matches('-').to_string()
+}
+
 fn bridge_path(workspace_root: &Path) -> Result<PathBuf, String> {
     let (workspace_root, _) = workspace::load_workspace(workspace_root)?;
     let local_root = std::env::var_os("LOCALAPPDATA")
@@ -305,6 +572,7 @@ fn bridge_path(workspace_root: &Path) -> Result<PathBuf, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::LibraryStats;
 
     #[test]
     fn round_trips_a_temporary_paper_list() {
@@ -322,6 +590,7 @@ mod tests {
             title: "Thermal studies".to_string(),
             description: "Selected by Codex".to_string(),
             papers: vec![PresentedPaper {
+                paper_id: "p2-local-paper".to_string(),
                 title: "Lunar heat flow".to_string(),
                 authors: "Sato".to_string(),
                 year: Some(2025),
@@ -338,7 +607,23 @@ mod tests {
             .expect("read list")
             .expect("list");
         assert_eq!(restored.title, "Thermal studies");
+        assert_eq!(restored.papers[0].paper_id, "p2-local-paper");
         assert_eq!(restored.papers[0].doi, "10.1234/example");
+
+        let report = persist_presented_list(&workspace_root, "reports").expect("save report");
+        let canonical_workspace = fs::canonicalize(&workspace_root).expect("canonical workspace");
+        assert!(report.starts_with(canonical_workspace.join("reports").join("codex-lists")));
+        assert!(fs::read_to_string(&report)
+            .expect("read report")
+            .contains("# Thermal studies"));
+
+        let candidates =
+            persist_presented_list(&workspace_root, "candidates").expect("save candidates");
+        assert!(candidates.starts_with(canonical_workspace.join("candidates").join("codex-lists")));
+        assert!(fs::read_to_string(&candidates)
+            .expect("read candidates")
+            .contains("\"title\": \"Thermal studies\""));
+
         clear_presented_list(&workspace_root).expect("clear list");
         assert!(read_presented_list(&workspace_root)
             .expect("read cleared list")
@@ -350,5 +635,68 @@ mod tests {
         let tools = tool_definitions();
         assert_eq!(tools[0]["name"], "present_paper_list");
         assert_eq!(tools[1]["name"], "clear_paper_list");
+        assert!(tools.iter().any(|tool| tool["name"] == "search_library"));
+        assert!(tools.iter().any(|tool| tool["name"] == "get_paper"));
+    }
+
+    #[test]
+    fn searches_the_shared_library_index() {
+        let index = LibraryIndex {
+            root: "Paperpile".to_string(),
+            papers: vec![
+                paper(
+                    "p2-moon",
+                    "Lunar dust transport",
+                    "Sato",
+                    2025,
+                    "Moon / Dust",
+                ),
+                paper(
+                    "p2-mars",
+                    "Martian atmospheric escape",
+                    "Chen",
+                    2022,
+                    "Mars",
+                ),
+            ],
+            collections: vec!["Mars".to_string(), "Moon / Dust".to_string()],
+            stats: LibraryStats {
+                paper_count: 2,
+                collection_count: 2,
+                starred_count: 0,
+                total_bytes: 2,
+            },
+            warnings: Vec::new(),
+        };
+        let input = SearchLibraryInput {
+            query: "lunar sato".to_string(),
+            collection: "dust".to_string(),
+            year_from: Some(2024),
+            year_to: None,
+            limit: 50,
+        };
+
+        let matches = search_index(&index, &input);
+
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].id, "p2-moon");
+    }
+
+    fn paper(id: &str, title: &str, authors: &str, year: u16, collection: &str) -> PaperRecord {
+        PaperRecord {
+            id: id.to_string(),
+            legacy_id: format!("legacy-{id}"),
+            identity_source: "test".to_string(),
+            title: title.to_string(),
+            authors: Some(authors.to_string()),
+            year: Some(year),
+            collections: vec![collection.to_string()],
+            path: format!("{id}.pdf"),
+            relative_path: format!("{id}.pdf"),
+            file_name: format!("{title}.pdf"),
+            size_bytes: 1,
+            modified_at: None,
+            starred: false,
+        }
     }
 }

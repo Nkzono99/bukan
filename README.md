@@ -9,7 +9,7 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - Windows の全ドライブから `マイドライブ/Paperpile` または
   `My Drive/Paperpile` を自動検出
 - `All Papers` 以下をコレクションとして索引化
-- 同一ファイル名・サイズの文献を統合
+- 書誌ファイル名とサイズに基づく安定IDで、コレクション間の同一文献を統合
 - `Starred Papers` と照合
 - タイトル、著者、年、コレクションの横断検索
 - コレクション、スター、更新日、タイトル、出版年による絞り込み・並び替え
@@ -20,6 +20,9 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - App内のPTYで生のCodex TUIを起動（Workspace単位、`workspace-write`）
 - Viewerで選択中の文献をCodexの作業コンテキストへ設定
 - CodexがMCPで提示した一時文献リストをViewerへ即時表示
+- MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
+- 一時文献リストを明示操作でWorkspaceのレポートまたは候補へ保存
+- PaperpileのPDF追加・削除・移動を監視し、索引を自動更新
 - `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
 
 Paperpile 配下に対する書き込み・移動・削除操作は実装していません。
@@ -95,3 +98,8 @@ git push origin v0.1.0
 整理候補は `reports/bukan-organization-plan.json` に保存されます。初期ルールは
 タイトル・ファイル名・既存コレクションを根拠にするため、Paperpileへ反映する前に
 `要確認` の項目をレビューしてください。
+
+文献IDはPaperpileのファイル名から得られる書誌情報とファイルサイズから生成する
+`p2-...` 形式です。PDF本文を開かないためDriveのオンデマンドファイルを実体化せず、
+コレクション間を移動しても同じ文献を追跡できます。旧版のパス由来IDも
+`legacyId` として返すため、既存連携は段階的に移行できます。

@@ -215,6 +215,8 @@ mod tests {
             root: "Paperpile".to_string(),
             papers: vec![PaperRecord {
                 id: "paper-1".to_string(),
+                legacy_id: "legacy-paper-1".to_string(),
+                identity_source: "test".to_string(),
                 title: "Kaguya observation of lunar surface charging".to_string(),
                 authors: None,
                 year: Some(2025),

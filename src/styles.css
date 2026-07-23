@@ -201,6 +201,8 @@ kbd { font: 500 10px/1.4 ui-monospace, "SFMono-Regular", Consolas, monospace; }
 .demo-badge { color: var(--warning); background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border: 1px solid color-mix(in srgb, var(--warning) 30%, var(--border)); border-radius: 5px; padding: 4px 7px; font-size: 8px; font-weight: 650; letter-spacing: .06em; }
 .scan-status { color: var(--accent); display: inline-flex; align-items: center; gap: 6px; font-size: 9px; }
 .scan-status i { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: scanPulse 1.15s ease-in-out infinite; }
+.watch-status { color: var(--text-secondary); display: inline-flex; align-items: center; gap: 6px; font-size: 9px; white-space: nowrap; }
+.watch-status i { width: 6px; height: 6px; border-radius: 50%; background: #55a276; box-shadow: 0 0 0 2px color-mix(in srgb, #55a276 14%, transparent); }
 @keyframes scanPulse { 50% { opacity: .25; transform: scale(.72); } }
 .warning-count { color: var(--warning); font-size: 8px; }
 .icon-button { border: 1px solid var(--border); border-radius: 6px; background: var(--surface); width: 30px; height: 30px; display: grid; place-items: center; cursor: pointer; }

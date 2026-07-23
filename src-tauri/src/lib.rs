@@ -34,6 +34,8 @@ pub struct LibraryLocation {
 #[serde(rename_all = "camelCase")]
 pub struct PaperRecord {
     pub id: String,
+    pub legacy_id: String,
+    pub identity_source: String,
     pub title: String,
     pub authors: Option<String>,
     pub year: Option<u16>,
@@ -65,8 +67,18 @@ pub struct LibraryIndex {
     pub warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryChangeToken {
+    pub token: String,
+    pub paper_count: usize,
+    pub checked_at: u64,
+}
+
 #[derive(Debug)]
 struct PaperBuilder {
+    id: String,
+    identity_source: String,
     path: PathBuf,
     relative_path: String,
     file_name: String,
@@ -232,6 +244,18 @@ fn clear_codex_paper_list(workspace_root: String) -> Result<(), String> {
     mcp::clear_presented_list(Path::new(&workspace_root))
 }
 
+#[tauri::command]
+fn persist_codex_paper_list(workspace_root: String, destination: String) -> Result<String, String> {
+    mcp::persist_presented_list(Path::new(&workspace_root), &destination)
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn library_change_token(root: String) -> Result<LibraryChangeToken, String> {
+    let root = normalize_library_root(Path::new(&root))?;
+    compute_library_change_token(&root)
+}
+
 fn vscode_workspace_url(root: &Path) -> Result<String, String> {
     let file_url = tauri::Url::from_directory_path(root)
         .map_err(|_| "ワークスペースのVS Code URLを作成できませんでした".to_string())?;
@@ -389,7 +413,8 @@ pub fn build_index(root: &Path) -> Result<LibraryIndex, String> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let key = paper_key(&file_name, metadata.len());
+        let key = paper_metadata_fingerprint(&file_name, metadata.len());
+        let identity_source = "paperpile-metadata".to_string();
         let modified_at = metadata
             .modified()
             .ok()
@@ -397,8 +422,11 @@ pub fn build_index(root: &Path) -> Result<LibraryIndex, String> {
             .map(|duration| duration.as_millis() as u64);
         let relative_path = relative.to_string_lossy().into_owned();
         let is_starred = starred_keys.contains(&key);
+        let stable_id = format!("p2-{}", &blake3::hash(key.as_bytes()).to_hex()[..20]);
 
         let paper = merged.entry(key).or_insert_with(|| PaperBuilder {
+            id: stable_id,
+            identity_source,
             path: path.clone(),
             relative_path,
             file_name,
@@ -417,9 +445,11 @@ pub fn build_index(root: &Path) -> Result<LibraryIndex, String> {
         .into_values()
         .map(|paper| {
             let (authors, year, title) = parse_paperpile_filename(&paper.file_name);
-            let id = blake3::hash(paper.relative_path.as_bytes()).to_hex()[..16].to_string();
+            let legacy_id = blake3::hash(paper.relative_path.as_bytes()).to_hex()[..16].to_string();
             PaperRecord {
-                id,
+                id: paper.id,
+                legacy_id,
+                identity_source: paper.identity_source,
                 title,
                 authors,
                 year,
@@ -486,13 +516,62 @@ fn scan_keys(root: &Path) -> HashSet<String> {
         .filter_map(|entry| {
             let metadata = entry.metadata().ok()?;
             let name = entry.file_name().to_string_lossy();
-            Some(paper_key(&name, metadata.len()))
+            Some(paper_metadata_fingerprint(&name, metadata.len()))
         })
         .collect()
 }
 
-fn paper_key(file_name: &str, size_bytes: u64) -> String {
-    format!("{}:{size_bytes}", file_name.to_lowercase())
+fn paper_metadata_fingerprint(file_name: &str, size_bytes: u64) -> String {
+    let (authors, year, title) = parse_paperpile_filename(file_name);
+    let normalized = format!(
+        "{}\0{}\0{}\0{size_bytes}",
+        authors.unwrap_or_default().to_lowercase(),
+        year.map(|value| value.to_string()).unwrap_or_default(),
+        title.to_lowercase()
+    );
+    blake3::hash(normalized.as_bytes()).to_hex().to_string()
+}
+
+fn compute_library_change_token(root: &Path) -> Result<LibraryChangeToken, String> {
+    let all_papers = root.join("All Papers");
+    let mut records = Vec::new();
+    for entry in walker(&all_papers)
+        .filter_map(Result::ok)
+        .filter(is_pdf_entry)
+    {
+        let metadata = match entry.metadata() {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        let modified = metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or_default();
+        let relative = entry
+            .path()
+            .strip_prefix(&all_papers)
+            .unwrap_or(entry.path())
+            .to_string_lossy()
+            .into_owned();
+        records.push((relative, metadata.len(), modified));
+    }
+    records.sort_by(|left, right| left.0.cmp(&right.0));
+    let mut hasher = blake3::Hasher::new();
+    for (relative, size, modified) in &records {
+        hasher.update(relative.as_bytes());
+        hasher.update(&size.to_le_bytes());
+        hasher.update(&modified.to_le_bytes());
+    }
+    Ok(LibraryChangeToken {
+        token: hasher.finalize().to_hex().to_string(),
+        paper_count: records.len(),
+        checked_at: std::time::SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|error| error.to_string())?
+            .as_millis() as u64,
+    })
 }
 
 fn collection_name(relative_path: &Path) -> String {
@@ -571,7 +650,9 @@ pub fn run() {
             set_codex_paper_context,
             clear_codex_paper_context,
             get_codex_paper_list,
-            clear_codex_paper_list
+            clear_codex_paper_list,
+            persist_codex_paper_list,
+            library_change_token
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bukan");
@@ -617,6 +698,49 @@ mod tests {
         assert_eq!(index.papers[0].collections, vec!["Favorite", "Methods"]);
         assert!(index.papers[0].starred);
         assert_eq!(index.stats.starred_count, 1);
+    }
+
+    #[test]
+    fn keeps_stable_id_when_a_paper_moves_between_collections() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let root = temporary.path();
+        let original_directory = root.join("All Papers").join("Old collection");
+        let moved_directory = root.join("All Papers").join("New collection");
+        fs::create_dir_all(&original_directory).expect("original collection");
+        fs::create_dir_all(&moved_directory).expect("new collection");
+        let original = original_directory.join("Sato 2025 - Lunar plasma.pdf");
+        let moved = moved_directory.join("Sato 2025 - Lunar plasma.pdf");
+        fs::write(&original, b"%PDF-stable-identity-test").expect("paper");
+
+        let before = build_index(root).expect("index before rename");
+        fs::rename(&original, &moved).expect("move paper");
+        let after = build_index(root).expect("index after rename");
+
+        assert_eq!(before.papers.len(), 1);
+        assert_eq!(before.papers[0].id, after.papers[0].id);
+        assert_ne!(before.papers[0].legacy_id, after.papers[0].legacy_id);
+        assert_eq!(after.papers[0].identity_source, "paperpile-metadata");
+    }
+
+    #[test]
+    fn library_change_token_detects_metadata_changes() {
+        let temporary = tempfile::tempdir().expect("tempdir");
+        let root = temporary.path();
+        let all_papers = root.join("All Papers");
+        fs::create_dir_all(&all_papers).expect("all papers");
+        fs::write(all_papers.join("One.pdf"), b"%PDF-one").expect("first paper");
+
+        let before = compute_library_change_token(root).expect("token before");
+        fs::write(all_papers.join("Two.pdf"), b"%PDF-two").expect("second paper");
+        let after_add = compute_library_change_token(root).expect("token after add");
+        fs::rename(all_papers.join("Two.pdf"), all_papers.join("Renamed.pdf"))
+            .expect("rename paper");
+        let after_rename = compute_library_change_token(root).expect("token after rename");
+
+        assert_eq!(before.paper_count, 1);
+        assert_eq!(after_add.paper_count, 2);
+        assert_ne!(before.token, after_add.token);
+        assert_ne!(after_add.token, after_rename.token);
     }
 
     #[test]
