@@ -40,6 +40,12 @@ Viewerから文献をCodexコンテキストへ設定すると、
 `.bukan/current-context.md` に現在の文献ID、タイトル、コレクション、読み取り専用PDF
 への参照が保存されます。このファイルはセッション用で、Gitには含めません。
 
+Codex起動時にはBukan自身がstdio MCPサーバーとしてセッション限定で登録されます。
+Codexは`present_paper_list`を呼び、検索・比較・選定した文献を構造化リストとして
+Viewerへ表示できます。リストは`%LOCALAPPDATA%\Bukan\bridge\`の一時状態であり、
+PaperpileおよびGoogle Drive Workspaceには書き込みません。`clear_paper_list`または
+GUIの「消去」で削除できます。
+
 ## 整理モデル
 
 Paperpile のフォルダは階層化でき、ラベルはフラットです。そのため Bukan は、

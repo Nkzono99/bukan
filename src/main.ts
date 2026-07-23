@@ -65,6 +65,23 @@ interface CodexTerminalExit {
   sessionId: number;
 }
 
+interface PresentedPaperList {
+  title: string;
+  description: string;
+  papers: PresentedPaper[];
+  updatedAt: number;
+}
+
+interface PresentedPaper {
+  title: string;
+  authors: string;
+  year: number | null;
+  doi: string;
+  url: string;
+  note: string;
+  status: string;
+}
+
 interface OrganizationAssignment {
   paperId: string;
   title: string;
@@ -127,6 +144,9 @@ const state: {
   codexStatus: CodexRuntimeStatus | null;
   codexContextPaperId: string | null;
   codexError: string | null;
+  codexPaperList: PresentedPaperList | null;
+  codexPaperListVisible: boolean;
+  codexPaperListSelection: number;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -155,6 +175,9 @@ const state: {
   codexStatus: null,
   codexContextPaperId: null,
   codexError: null,
+  codexPaperList: null,
+  codexPaperListVisible: false,
+  codexPaperListSelection: 0,
 };
 
 const icons = {
@@ -427,6 +450,9 @@ function sidebarTemplate(): string {
       <button class="nav-item organize-nav ${state.mode === "organize" ? "active" : ""}" data-view="organize" title="${state.workspaceRoot ? "Bukan分類候補を確認" : "ワークスペースを開くと利用できます"}">
         <span>${icons.folder}Bukan 整理</span><em>${state.workspaceRoot ? "→" : "—"}</em>
       </button>
+      ${state.codexPaperList ? `<button class="nav-item codex-list-nav ${state.codexPaperListVisible ? "active" : ""}" data-view="codex-list">
+        <span>${icons.terminal}Codex リスト</span><em>${state.codexPaperList.papers.length}</em>
+      </button>` : ""}
       <p class="nav-label collections-label">コレクション <em>${visibleCollectionCount}</em></p>
       <div class="collection-list">
         ${collectionTree.map((node) => collectionTreeItemTemplate(node)).join("")}
@@ -576,6 +602,51 @@ function viewerTemplate(): string {
   </section>`;
 }
 
+function normalizedPaperTitle(title: string): string {
+  return title.toLocaleLowerCase().normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+}
+
+function matchingLibraryPaper(paper: PresentedPaper): PaperRecord | null {
+  const normalized = normalizedPaperTitle(paper.title);
+  return state.library?.papers.find((candidate) => normalizedPaperTitle(candidate.title) === normalized) ?? null;
+}
+
+function codexPaperListTemplate(): string {
+  const list = state.codexPaperList;
+  if (!list) return viewerTemplate();
+  return `<section class="viewer codex-list-viewer">
+    <header class="viewer-header codex-list-header">
+      <div class="viewer-title-wrap">
+        <p class="section-kicker">CODEX PAPER LIST</p>
+        <h2>${escapeHtml(list.title)}</h2>
+        <p>${list.papers.length} papers · 一時リスト</p>
+      </div>
+      <div class="viewer-actions">
+        <button class="codex-text-button clear-codex-paper-list" type="button">消去</button>
+        <button class="icon-button close-codex-paper-list" type="button" title="PDFへ戻る" aria-label="PDFへ戻る">${icons.close}</button>
+      </div>
+    </header>
+    ${list.description ? `<div class="codex-list-description">${escapeHtml(list.description)}</div>` : ""}
+    <div class="codex-presented-list">
+      ${list.papers.map((paper, index) => {
+        const libraryPaper = matchingLibraryPaper(paper);
+        const metadata = [paper.authors, paper.year?.toString(), paper.doi ? `doi:${paper.doi}` : ""].filter(Boolean).join(" · ");
+        return `<article class="codex-presented-paper ${state.codexPaperListSelection === index ? "selected" : ""}">
+          <button class="codex-paper-select" type="button" data-codex-paper-index="${index}">
+            <span class="paper-accent"></span>
+            <span><small>${escapeHtml(paper.status || (libraryPaper ? "IN LIBRARY" : "CANDIDATE"))}</small><strong>${escapeHtml(paper.title)}</strong><i>${escapeHtml(metadata || "書誌情報なし")}</i></span>
+          </button>
+          ${paper.note ? `<p>${escapeHtml(paper.note)}</p>` : ""}
+          <footer>
+            ${libraryPaper ? `<button type="button" data-open-library-paper="${libraryPaper.id}">ライブラリで開く</button>` : ""}
+            ${paper.url ? `<span title="${escapeHtml(paper.url)}">${escapeHtml(paper.url)}</span>` : ""}
+          </footer>
+        </article>`;
+      }).join("")}
+    </div>
+  </section>`;
+}
+
 function codexPaneTemplate(): string {
   const contextPaper = state.library?.papers.find((paper) => paper.id === state.codexContextPaperId);
   const status = state.codexStatus;
@@ -711,6 +782,7 @@ function workspaceTemplate(): string {
           ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
           ${state.library?.warnings.length ? `<span class="warning-count" title="読み込めなかったファイルがあります">${state.library.warnings.length} warnings</span>` : ""}
+          ${state.codexPaperList ? `<button class="codex-list-badge" type="button">${icons.terminal}<span>${escapeHtml(state.codexPaperList.title)}</span><em>${state.codexPaperList.papers.length}</em></button>` : ""}
           <button class="command-trigger" type="button">${icons.search}<span>検索とコマンド</span><kbd>Ctrl K</kbd></button>
           ${state.mode === "library" ? `<button class="icon-button toggle-list" title="論文一覧を${state.listCollapsed ? "表示" : "格納"}" aria-label="論文一覧を${state.listCollapsed ? "表示" : "格納"}">${icons.list}</button>` : ""}
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
@@ -718,7 +790,7 @@ function workspaceTemplate(): string {
       </header>
       ${state.mode === "organize"
         ? organizationTemplate()
-        : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""} ${state.codexOpen ? "codex-open" : ""}">${paperListTemplate(papers)}${viewerTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`}
+        : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""} ${state.codexOpen ? "codex-open" : ""}">${paperListTemplate(papers)}${state.codexPaperListVisible ? codexPaperListTemplate() : viewerTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`}
     </main>
     ${commandPaletteTemplate()}
   </div>`;
@@ -779,6 +851,32 @@ function bindEvents(): void {
   document.querySelector<HTMLElement>(".stop-codex")?.addEventListener("click", () => void stopCodexTerminal());
   document.querySelector<HTMLElement>(".set-codex-context")?.addEventListener("click", () => void setSelectedPaperAsCodexContext());
   document.querySelector<HTMLElement>(".clear-codex-context")?.addEventListener("click", clearCodexContext);
+  document.querySelectorAll<HTMLElement>("[data-view='codex-list'], .codex-list-badge").forEach((element) => {
+    element.addEventListener("click", () => {
+      state.mode = "library";
+      state.codexPaperListVisible = true;
+      render();
+    });
+  });
+  document.querySelector<HTMLElement>(".close-codex-paper-list")?.addEventListener("click", () => {
+    state.codexPaperListVisible = false;
+    render();
+  });
+  document.querySelector<HTMLElement>(".clear-codex-paper-list")?.addEventListener("click", () => void clearCodexPaperList());
+  document.querySelectorAll<HTMLElement>("[data-codex-paper-index]").forEach((element) => {
+    element.addEventListener("click", () => {
+      state.codexPaperListSelection = Number(element.dataset.codexPaperIndex ?? 0);
+      render();
+    });
+  });
+  document.querySelectorAll<HTMLElement>("[data-open-library-paper]").forEach((element) => {
+    element.addEventListener("click", () => {
+      state.selectedId = element.dataset.openLibraryPaper ?? null;
+      state.codexPaperListVisible = false;
+      state.mode = "library";
+      render();
+    });
+  });
   document.querySelector<HTMLElement>(".command-backdrop")?.addEventListener("click", (event) => {
     if (event.target === event.currentTarget) closeCommandPalette();
   });
@@ -818,6 +916,8 @@ function bindEvents(): void {
     element.addEventListener("click", () => {
       state.workspaceRoot = null;
       state.workspaceName = null;
+      state.codexPaperList = null;
+      state.codexPaperListVisible = false;
       void loadLibrary(element.dataset.libraryPath ?? "");
     });
   });
@@ -1132,6 +1232,43 @@ async function stopCodexTerminal(): Promise<void> {
   }
 }
 
+let codexPaperListPolling = false;
+
+async function refreshCodexPaperList(): Promise<void> {
+  if (!state.workspaceRoot || codexPaperListPolling || !("__TAURI_INTERNALS__" in window)) return;
+  codexPaperListPolling = true;
+  try {
+    const next = await invoke<PresentedPaperList | null>("get_codex_paper_list", {
+      workspaceRoot: state.workspaceRoot,
+    });
+    const changed = next?.updatedAt !== state.codexPaperList?.updatedAt;
+    if (!changed) return;
+    const hadList = Boolean(state.codexPaperList);
+    state.codexPaperList = next;
+    state.codexPaperListSelection = 0;
+    state.codexPaperListVisible = Boolean(next);
+    if (next) showToast(`${next.title} · ${next.papers.length}件をCodexから受け取りました`);
+    else if (hadList) state.codexPaperListVisible = false;
+    render();
+  } catch (error) {
+    console.warn("Could not refresh Codex paper list", error);
+  } finally {
+    codexPaperListPolling = false;
+  }
+}
+
+async function clearCodexPaperList(): Promise<void> {
+  if (!state.workspaceRoot) return;
+  try {
+    await invoke("clear_codex_paper_list", { workspaceRoot: state.workspaceRoot });
+    state.codexPaperList = null;
+    state.codexPaperListVisible = false;
+    render();
+  } catch (error) {
+    showToast(String(error), true);
+  }
+}
+
 async function setSelectedPaperAsCodexContext(): Promise<void> {
   const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
   if (!paper || !state.workspaceRoot) return;
@@ -1219,6 +1356,8 @@ async function chooseLibrary(): Promise<void> {
       state.codexOpen = false;
       state.codexStatus = null;
       state.codexContextPaperId = null;
+      state.codexPaperList = null;
+      state.codexPaperListVisible = false;
       localStorage.removeItem("bukan.workspaceRoot");
       await loadLibrary(selected);
     }
@@ -1262,6 +1401,8 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
   state.organizationPlan = null;
   state.codexStatus = null;
   state.codexContextPaperId = null;
+  state.codexPaperList = null;
+  state.codexPaperListVisible = false;
   localStorage.setItem("bukan.workspaceRoot", descriptor.root);
   await loadLibrary(descriptor.paperpileRoot);
 }
@@ -1416,5 +1557,7 @@ window.addEventListener("keydown", (event) => {
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
   if (state.theme === "system") applyTheme();
 });
+
+window.setInterval(() => void refreshCodexPaperList(), 1200);
 
 void initialize();

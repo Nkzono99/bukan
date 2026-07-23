@@ -116,6 +116,7 @@ impl CodexTerminalState {
         let command = find_codex_command().ok_or_else(|| {
             "Codex CLIが見つかりません。Codexをインストールしてから再試行してください".to_string()
         })?;
+        let mcp_overrides = mcp_config_overrides(&workspace_root)?;
         let size = PtySize {
             rows: rows.unwrap_or(DEFAULT_ROWS).clamp(8, 500),
             cols: cols.unwrap_or(DEFAULT_COLS).clamp(20, 500),
@@ -125,7 +126,7 @@ impl CodexTerminalState {
         let pair = native_pty_system()
             .openpty(size)
             .map_err(|error| format!("Codex用ターミナルを作成できませんでした: {error}"))?;
-        let mut command_builder = command_builder(&command, &workspace_root);
+        let mut command_builder = command_builder(&command, &workspace_root, &mcp_overrides);
         command_builder.cwd(&workspace_root);
         command_builder.env("TERM", "xterm-256color");
         command_builder.env("COLORTERM", "truecolor");
@@ -300,7 +301,11 @@ fn find_codex_command() -> Option<CodexCommand> {
     }
 }
 
-fn command_builder(command: &CodexCommand, workspace_root: &Path) -> CommandBuilder {
+fn command_builder(
+    command: &CodexCommand,
+    workspace_root: &Path,
+    config_overrides: &[String],
+) -> CommandBuilder {
     match command {
         CodexCommand::Direct(path) => {
             let mut builder = CommandBuilder::new(path);
@@ -310,13 +315,17 @@ fn command_builder(command: &CodexCommand, workspace_root: &Path) -> CommandBuil
             builder.arg("workspace-write");
             builder.arg("--ask-for-approval");
             builder.arg("on-request");
+            for config_override in config_overrides {
+                builder.arg("--config");
+                builder.arg(config_override);
+            }
             builder
         }
         CodexCommand::CommandScript(path) => {
             #[cfg(target_os = "windows")]
             {
                 let mut builder = CommandBuilder::new("cmd.exe");
-                let script = windows_command_string(path, workspace_root);
+                let script = windows_command_string(path, workspace_root, config_overrides);
                 builder.args(["/D", "/S", "/C", script.as_str()]);
                 builder
             }
@@ -329,6 +338,10 @@ fn command_builder(command: &CodexCommand, workspace_root: &Path) -> CommandBuil
                 builder.arg("workspace-write");
                 builder.arg("--ask-for-approval");
                 builder.arg("on-request");
+                for config_override in config_overrides {
+                    builder.arg("--config");
+                    builder.arg(config_override);
+                }
                 builder
             }
         }
@@ -336,15 +349,43 @@ fn command_builder(command: &CodexCommand, workspace_root: &Path) -> CommandBuil
 }
 
 #[cfg(target_os = "windows")]
-fn windows_command_string(command: &Path, workspace_root: &Path) -> String {
+fn windows_command_string(
+    command: &Path,
+    workspace_root: &Path,
+    config_overrides: &[String],
+) -> String {
     fn escape_percent(value: &str) -> String {
         value.replace('%', "%%")
     }
-    format!(
+    let mut value = format!(
         "\"{}\" -C \"{}\" --sandbox workspace-write --ask-for-approval on-request",
         escape_percent(&command.to_string_lossy()),
         escape_percent(&workspace_root.to_string_lossy())
-    )
+    );
+    for config_override in config_overrides {
+        value.push_str(" --config \"");
+        value.push_str(&escape_percent(config_override));
+        value.push('"');
+    }
+    value
+}
+
+fn mcp_config_overrides(workspace_root: &Path) -> Result<Vec<String>, String> {
+    let executable = std::env::current_exe()
+        .map_err(|error| format!("Bukan MCPの実行ファイルを特定できませんでした: {error}"))?;
+    let executable = executable.to_string_lossy();
+    let workspace_root = workspace_root.to_string_lossy();
+    if executable.contains('\'') || workspace_root.contains('\'') {
+        return Err(
+            "BukanまたはWorkspaceのパスにアポストロフィがあるためMCPを設定できません".to_string(),
+        );
+    }
+    Ok(vec![
+        format!("mcp_servers.bukan.command='{executable}'"),
+        "mcp_servers.bukan.args=['--bukan-mcp-stdio']".to_string(),
+        format!("mcp_servers.bukan.env.BUKAN_WORKSPACE='{workspace_root}'"),
+        "mcp_servers.bukan.required=true".to_string(),
+    ])
 }
 
 fn command_display(command: &CodexCommand) -> String {
@@ -538,9 +579,14 @@ mod tests {
         let command = windows_command_string(
             Path::new(r"C:\Users\Test User\AppData\Roaming\npm\codex.cmd"),
             Path::new(r"G:\マイドライブ\Bukan Workspaces\Lunar 100%"),
+            &[
+                "mcp_servers.bukan.command='C:\\Program Files\\Bukan\\bukan.exe'".to_string(),
+                "mcp_servers.bukan.args=['--bukan-mcp-stdio']".to_string(),
+            ],
         );
         assert!(command.contains("\"C:\\Users\\Test User"));
         assert!(command.contains("Lunar 100%%\""));
         assert!(command.contains("--sandbox workspace-write"));
+        assert!(command.contains("mcp_servers.bukan.command="));
     }
 }

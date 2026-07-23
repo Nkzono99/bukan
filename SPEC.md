@@ -21,6 +21,11 @@ Viewerで選択した論文は`.bukan/current-context.md`を介してCodexへ渡
 には読み取り専用PDFへの参照と文献情報だけを保存し、Git管理しない。将来のRAG/MCP
 実装でも、Paperpileへのアクセス制御とパス検証はRustコアへ集約する。
 
+Codexが検索・比較・収集した文献リストは、Bukan MCPの`present_paper_list`でGUIへ
+一時表示できる。リストはローカルブリッジだけに保持し、自動的にPaperpileや
+Workspaceへ永続化しない。これにより専用RAG索引を必須にせず、生のCodexを検索・
+選定エンジンとして使いながら、結果確認だけをViewerで行える。
+
 Paperpile公式APIまたはMCPが一般提供されるまでは、分類・ラベル変更は適用計画と
 インポート候補までに留める。同期フォルダを直接変更する実装は行わない。
 

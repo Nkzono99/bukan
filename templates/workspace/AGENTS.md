@@ -37,3 +37,6 @@
   and synthesized outputs under `reports/`.
 - Keep temporary extraction and retrieval artifacts in `cache/`; they must remain
   reproducible from the source PDFs.
+- When a search, comparison, or collection task produces a useful paper list, call
+  the Bukan MCP `present_paper_list` tool so the user can review it beside the raw
+  Codex terminal. This list is temporary and is not a Paperpile write.

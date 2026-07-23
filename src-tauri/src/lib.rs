@@ -11,6 +11,7 @@ use tauri::{AppHandle, Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use walkdir::{DirEntry, WalkDir};
 
+pub mod mcp;
 pub mod organization;
 pub mod terminal;
 pub mod workspace;
@@ -219,6 +220,16 @@ fn set_codex_paper_context(
 #[tauri::command]
 fn clear_codex_paper_context(workspace_root: String) -> Result<(), String> {
     terminal::clear_current_context(Path::new(&workspace_root))
+}
+
+#[tauri::command]
+fn get_codex_paper_list(workspace_root: String) -> Result<Option<mcp::PresentedPaperList>, String> {
+    mcp::read_presented_list(Path::new(&workspace_root))
+}
+
+#[tauri::command]
+fn clear_codex_paper_list(workspace_root: String) -> Result<(), String> {
+    mcp::clear_presented_list(Path::new(&workspace_root))
 }
 
 fn vscode_workspace_url(root: &Path) -> Result<String, String> {
@@ -558,7 +569,9 @@ pub fn run() {
             resize_codex_terminal,
             stop_codex_terminal,
             set_codex_paper_context,
-            clear_codex_paper_context
+            clear_codex_paper_context,
+            get_codex_paper_list,
+            clear_codex_paper_list
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bukan");
