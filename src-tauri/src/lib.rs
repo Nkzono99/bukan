@@ -14,6 +14,7 @@ use walkdir::{DirEntry, WalkDir};
 pub mod mcp;
 pub mod organization;
 pub mod terminal;
+pub mod updates;
 pub mod workspace;
 
 #[derive(Default)]
@@ -633,6 +634,8 @@ pub fn run() {
         .manage(AppState::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![
             detect_libraries,
             initialize_workspace,
@@ -652,7 +655,12 @@ pub fn run() {
             get_codex_paper_list,
             clear_codex_paper_list,
             persist_codex_paper_list,
-            library_change_token
+            library_change_token,
+            updates::update_auth_status,
+            updates::save_update_github_token,
+            updates::clear_update_github_token,
+            updates::check_app_update,
+            updates::install_app_update
         ])
         .run(tauri::generate_context!())
         .expect("error while running Bukan");

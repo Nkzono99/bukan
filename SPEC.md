@@ -37,6 +37,11 @@ Paperpileの同期領域へ書き込むMCPツールは提供しない。
 Paperpile公式APIまたはMCPが一般提供されるまでは、分類・ラベル変更は適用計画と
 インポート候補までに留める。同期フォルダを直接変更する実装は行わない。
 
+Appの配布はprivate GitHub Releaseを正本とする。起動時に更新メタデータを確認し、
+更新がある場合は利用者の承認後にダウンロード、Tauri Updater署名の検証、
+インストール、再起動を行う。private ReleaseのGitHub tokenはOSの資格情報ストアへ
+保存し、Workspace、Paperpile、リポジトリには保存しない。
+
 ---
 
 ## 結論

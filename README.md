@@ -23,6 +23,7 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
 - 一時文献リストを明示操作でWorkspaceのレポートまたは候補へ保存
 - PaperpileのPDF追加・削除・移動を監視し、索引を自動更新
+- private GitHub Releaseを起動時に確認し、GUIから署名検証付きで更新
 - `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
 
 Paperpile 配下に対する書き込み・移動・削除操作は実装していません。
@@ -78,7 +79,7 @@ npm run desktop:build
 `package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` の
 バージョンを揃え、同じバージョンの `v` 付きタグを push すると、GitHub Actions が
 Windows 用の署名なし NSIS インストーラーをビルドし、Private GitHub Release へ
-添付します。
+添付します。同時にTauri Updater用の`latest.json`と署名を生成します。
 
 ```powershell
 git tag v0.1.0
@@ -86,6 +87,28 @@ git push origin v0.1.0
 ```
 
 タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。
+
+## アプリの更新
+
+Appは起動後にprivate GitHub Releaseを静かに確認し、新しいバージョンがある場合だけ
+更新ダイアログを表示します。Top barのバージョン表示またはコマンドパレットの
+「Bukanの更新を確認」から手動確認もできます。
+
+privateリポジトリへアクセスする認証は、次の順で自動検出します。
+
+1. AppがWindows Credential Managerへ保存したfine-grained token
+2. `BUKAN_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`
+3. `gh auth login`済みのGitHub CLI
+
+tokenを使う場合は対象リポジトリを`Nkzono99/bukan`、リポジトリ権限を
+`Contents: Read-only`に限定できます。tokenはWorkspaceや設定ファイルへ保存しません。
+
+Updater署名鍵はGitHub Actionsの`TAURI_SIGNING_PRIVATE_KEY` secretへ登録済みです。
+ローカルバックアップは`%USERPROFILE%\.tauri\bukan-updater.key`、パスワードの
+Windows DPAPIバックアップは同じ場所の`bukan-updater.password.dpapi`です。この鍵を
+失うと、既存インストールへ同じ更新経路で配布できなくなるため、2ファイルを一緒に
+保持してください。これはアップデート検証用署名であり、Windowsコード署名証明書
+ではありません。
 
 ## 外部ワークスペース
 

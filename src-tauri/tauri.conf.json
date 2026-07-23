@@ -33,7 +33,19 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "createUpdaterArtifacts": true,
     "shortDescription": "Paperpile literature workspace",
     "longDescription": "A read-only viewer and organizer for literature synchronized by Paperpile."
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDg4MzY1MDIzNTg0RTIzRjcKUldUM0kwNVlJMUEyaUE3bk1pamh2OFJkQUErK2pvNks1Z0g4OFNyZHQ0ZW5NWXo4SExqaTg0aTIK",
+      "endpoints": [
+        "https://github.com/Nkzono99/bukan/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

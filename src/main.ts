@@ -1,4 +1,5 @@
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+import { getVersion } from "@tauri-apps/api/app";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 import { FitAddon } from "@xterm/addon-fit";
@@ -91,6 +92,29 @@ interface LibraryChangeToken {
   checkedAt: number;
 }
 
+interface UpdateAuthStatus {
+  configured: boolean;
+  source: string | null;
+  credentialStorageAvailable: boolean;
+}
+
+interface AppUpdateCheckResult {
+  currentVersion: string;
+  available: boolean;
+  version: string | null;
+  notes: string | null;
+  publishedAt: string | null;
+  authSource: string;
+}
+
+interface AppUpdateProgress {
+  event: "started" | "progress" | "finished";
+  data?: {
+    contentLength?: number | null;
+    downloaded?: number;
+  };
+}
+
 interface OrganizationAssignment {
   paperId: string;
   title: string;
@@ -158,6 +182,15 @@ const state: {
   codexPaperListSelection: number;
   libraryChangeToken: string | null;
   libraryLastCheckedAt: number | null;
+  appVersion: string;
+  updateAuth: UpdateAuthStatus | null;
+  updateResult: AppUpdateCheckResult | null;
+  updateDialogOpen: boolean;
+  updateChecking: boolean;
+  updateInstalling: boolean;
+  updateDownloaded: number;
+  updateContentLength: number | null;
+  updateError: string | null;
 } = {
   loading: true,
   loadingLabel: "Google Drive のマウントを探しています",
@@ -191,6 +224,15 @@ const state: {
   codexPaperListSelection: 0,
   libraryChangeToken: null,
   libraryLastCheckedAt: null,
+  appVersion: "0.1.0",
+  updateAuth: null,
+  updateResult: null,
+  updateDialogOpen: false,
+  updateChecking: false,
+  updateInstalling: false,
+  updateDownloaded: 0,
+  updateContentLength: null,
+  updateError: null,
 };
 
 const icons = {
@@ -413,6 +455,7 @@ function onboardingTemplate(): string {
     : `<div class="not-found"><span class="status-dot"></span> マウント済みの Paperpile は見つかりませんでした</div>`;
 
   return `<main class="onboarding-shell">
+    <button class="onboarding-version update-trigger" type="button">Bukan v${escapeHtml(state.appVersion)} · 更新を確認</button>
     <section class="onboarding-card">
       <div class="onboarding-mark"><span>B</span><i></i></div>
       <p class="eyebrow">LITERATURE WORKSPACE</p>
@@ -514,6 +557,7 @@ function commandPaletteTemplate(): string {
     ["theme-light", icons.sun, "テーマ: Light", "表示"],
     ["theme-dark", icons.moon, "テーマ: Dark", "表示"],
     ["refresh", icons.refresh, "ライブラリを再読み込み", "データ"],
+    ["check-update", icons.refresh, "Bukanの更新を確認", `App v${state.appVersion}`],
   ];
   return `<div class="command-backdrop" role="presentation">
     <section class="command-palette" role="dialog" aria-modal="true" aria-label="コマンドパレット">
@@ -803,6 +847,9 @@ function workspaceTemplate(): string {
           ${isDemoMode ? `<span class="demo-badge">DEMO DATA · 4件のみ</span>` : ""}
           ${state.scanning ? `<span class="scan-status"><i></i>ライブラリを読み取り中</span>` : ""}
           ${!state.scanning && state.libraryLastCheckedAt ? `<span class="watch-status"><i></i>Paperpile 監視中</span>` : ""}
+          <button class="update-trigger update-status-button ${state.updateResult?.available ? "available" : ""}" type="button">
+            ${state.updateChecking ? `<i></i>確認中` : state.updateResult?.available ? `v${escapeHtml(state.updateResult.version ?? "")} 更新` : `v${escapeHtml(state.appVersion)}`}
+          </button>
           ${state.library?.warnings.length ? `<span class="warning-count" title="読み込めなかったファイルがあります">${state.library.warnings.length} warnings</span>` : ""}
           ${state.codexPaperList ? `<button class="codex-list-badge" type="button">${icons.terminal}<span>${escapeHtml(state.codexPaperList.title)}</span><em>${state.codexPaperList.papers.length}</em></button>` : ""}
           <button class="command-trigger" type="button">${icons.search}<span>検索とコマンド</span><kbd>Ctrl K</kbd></button>
@@ -818,6 +865,62 @@ function workspaceTemplate(): string {
   </div>`;
 }
 
+function updateDialogTemplate(): string {
+  if (!state.updateDialogOpen) return "";
+  const result = state.updateResult;
+  const auth = state.updateAuth;
+  const percent = state.updateContentLength
+    ? Math.min(100, Math.round(state.updateDownloaded / state.updateContentLength * 100))
+    : null;
+  const authLabel = auth?.source === "windows-credential-manager"
+    ? "Windows Credential Manager"
+    : auth?.source === "github-cli"
+      ? "GitHub CLI"
+      : auth?.source === "environment"
+        ? "環境変数"
+        : null;
+
+  return `<div class="update-backdrop" role="presentation">
+    <section class="update-dialog" role="dialog" aria-modal="true" aria-labelledby="update-title">
+      <header>
+        <div><p class="section-kicker">BUKAN UPDATE</p><h2 id="update-title">アプリの更新</h2></div>
+        <button class="icon-button close-update-dialog" type="button" ${state.updateInstalling ? "disabled" : ""} aria-label="閉じる">${icons.close}</button>
+      </header>
+      <div class="update-dialog-body">
+        <div class="update-version-line"><span>現在</span><strong>v${escapeHtml(state.appVersion)}</strong>${authLabel ? `<em>${escapeHtml(authLabel)}で認証</em>` : ""}</div>
+        ${state.updateChecking ? `<div class="update-working"><span class="reading-spinner"><i></i><i></i><i></i></span><strong>private GitHub Releaseを確認しています</strong><small>最新版の署名とメタデータを取得中です</small></div>` : ""}
+        ${state.updateInstalling ? `<div class="update-working">
+          <span class="reading-spinner"><i></i><i></i><i></i></span>
+          <strong>${percent === null ? "更新をダウンロードしています" : `更新をダウンロードしています · ${percent}%`}</strong>
+          <small>署名を検証後、Bukanを終了してインストールします</small>
+          <div class="update-progress"><i style="width:${percent ?? 18}%"></i></div>
+        </div>` : ""}
+        ${!state.updateChecking && !state.updateInstalling && result?.available ? `<div class="update-available">
+          <span>UPDATE AVAILABLE</span>
+          <h3>v${escapeHtml(result.version ?? "")}</h3>
+          <p>${escapeHtml(result.notes?.trim() || "新しいBukanリリースを利用できます。")}</p>
+        </div>` : ""}
+        ${!state.updateChecking && !state.updateInstalling && result && !result.available ? `<div class="update-current"><span>✓</span><div><strong>最新版です</strong><small>利用可能な更新はありません</small></div></div>` : ""}
+        ${state.updateError ? `<p class="update-error">${escapeHtml(state.updateError)}</p>` : ""}
+        ${!state.updateChecking && !state.updateInstalling && !auth?.configured ? `<div class="update-auth">
+          <h3>GitHubへ接続</h3>
+          <p>privateリポジトリのReleaseを取得するため、fine-grained tokenが必要です。対象リポジトリを <strong>Nkzono99/bukan</strong>、権限を <strong>Contents: Read-only</strong> にしてください。</p>
+          <label><span>GitHub token</span><input id="update-token" type="password" placeholder="github_pat_…" autocomplete="off" /></label>
+          <button class="action-button save-update-token" type="button">安全に保存して確認</button>
+          <small>tokenはWindows Credential Managerへ保存され、WorkspaceやGitには書き込みません。gh auth login済みの場合は入力不要です。</small>
+        </div>` : ""}
+      </div>
+      <footer>
+        ${auth?.source === "windows-credential-manager" && !state.updateInstalling ? `<button class="secondary-update-action clear-update-token" type="button">保存したtokenを削除</button>` : `<span></span>`}
+        <div>
+          ${!state.updateInstalling ? `<button class="secondary-update-action check-update" type="button" ${state.updateChecking ? "disabled" : ""}>再確認</button>` : ""}
+          ${result?.available && !state.updateInstalling ? `<button class="action-button install-update" type="button">更新して再起動</button>` : ""}
+        </div>
+      </footer>
+    </section>
+  </div>`;
+}
+
 function loadingTemplate(message = "Google Drive を探しています"): string {
   return `<main class="loading-screen"><div class="loading-mark"><span>B</span><i></i></div><p>${escapeHtml(message)}</p><small>Paperpile のファイルは変更しません</small></main>`;
 }
@@ -825,14 +928,27 @@ function loadingTemplate(message = "Google Drive を探しています"): string
 function render(): void {
   applyTheme();
   codexTerminalHost.remove();
-  if (state.loading) app.innerHTML = loadingTemplate(state.loadingLabel);
-  else if (!state.library) app.innerHTML = onboardingTemplate();
-  else app.innerHTML = workspaceTemplate();
+  let content = "";
+  if (state.loading) content = loadingTemplate(state.loadingLabel);
+  else if (!state.library) content = onboardingTemplate();
+  else content = workspaceTemplate();
+  app.innerHTML = content + updateDialogTemplate();
   bindEvents();
   attachCodexTerminal();
 }
 
 function bindEvents(): void {
+  document.querySelectorAll<HTMLElement>(".update-trigger").forEach((element) => {
+    element.addEventListener("click", () => void checkForAppUpdate(false));
+  });
+  document.querySelector<HTMLElement>(".close-update-dialog")?.addEventListener("click", closeUpdateDialog);
+  document.querySelector<HTMLElement>(".update-backdrop")?.addEventListener("click", (event) => {
+    if (event.target === event.currentTarget) closeUpdateDialog();
+  });
+  document.querySelector<HTMLElement>(".check-update")?.addEventListener("click", () => void checkForAppUpdate(false));
+  document.querySelector<HTMLElement>(".save-update-token")?.addEventListener("click", () => void saveUpdateToken());
+  document.querySelector<HTMLElement>(".clear-update-token")?.addEventListener("click", () => void clearUpdateToken());
+  document.querySelector<HTMLElement>(".install-update")?.addEventListener("click", () => void installAppUpdate());
   document.querySelectorAll<HTMLElement>("[data-rail-action]").forEach((element) => {
     element.addEventListener("click", () => {
       const action = element.dataset.railAction;
@@ -1076,6 +1192,8 @@ function executeCommand(action: string): void {
     setTheme(action.slice(6) as ThemeMode);
   } else if (action === "refresh") {
     if (state.library) void loadLibrary(state.library.root, true);
+  } else if (action === "check-update") {
+    void checkForAppUpdate(false);
   } else {
     render();
   }
@@ -1167,6 +1285,135 @@ async function setupCodexEventListeners(): Promise<void> {
     };
     render();
   });
+}
+
+async function setupUpdateIntegration(): Promise<void> {
+  if (!("__TAURI_INTERNALS__" in window)) {
+    if (isDemoMode && new URLSearchParams(window.location.search).get("update") === "available") {
+      state.updateAuth = {
+        configured: true,
+        source: "github-cli",
+        credentialStorageAvailable: true,
+      };
+      state.updateResult = {
+        currentVersion: state.appVersion,
+        available: true,
+        version: "0.2.0",
+        notes: "Paperpile差分監視の改善\nCodex文献リスト連携の更新\nUpdaterによる安全な配布",
+        publishedAt: new Date().toISOString(),
+        authSource: "github-cli",
+      };
+      state.updateDialogOpen = true;
+    }
+    return;
+  }
+  try {
+    state.appVersion = await getVersion();
+    state.updateAuth = await invoke<UpdateAuthStatus>("update_auth_status");
+    await listen<AppUpdateProgress>("app-update-progress", ({ payload }) => {
+      if (payload.event === "started") {
+        state.updateDownloaded = 0;
+        state.updateContentLength = payload.data?.contentLength ?? null;
+      } else if (payload.event === "progress") {
+        state.updateDownloaded = payload.data?.downloaded ?? state.updateDownloaded;
+        state.updateContentLength = payload.data?.contentLength ?? state.updateContentLength;
+      } else if (payload.event === "finished") {
+        state.updateDownloaded = state.updateContentLength ?? state.updateDownloaded;
+      }
+      render();
+    });
+    window.setTimeout(() => void checkForAppUpdate(true), 1800);
+  } catch (error) {
+    console.warn("Could not initialize app updates", error);
+  }
+}
+
+function closeUpdateDialog(): void {
+  if (state.updateInstalling) return;
+  state.updateDialogOpen = false;
+  render();
+}
+
+async function checkForAppUpdate(quiet: boolean): Promise<void> {
+  if (!("__TAURI_INTERNALS__" in window) || state.updateChecking || state.updateInstalling) return;
+  state.updateError = null;
+  if (!quiet) state.updateDialogOpen = true;
+  try {
+    state.updateAuth = await invoke<UpdateAuthStatus>("update_auth_status");
+    if (!state.updateAuth.configured) {
+      if (!quiet) {
+        state.updateError = "private Releaseへ接続するGitHub認証を設定してください。";
+        render();
+      }
+      return;
+    }
+    state.updateChecking = true;
+    render();
+    state.updateResult = await invoke<AppUpdateCheckResult>("check_app_update");
+    if (state.updateResult.available) {
+      state.updateDialogOpen = true;
+      if (quiet) showToast(`Bukan v${state.updateResult.version} を利用できます`);
+    } else if (!quiet) {
+      showToast("Bukanは最新版です");
+    }
+  } catch (error) {
+    state.updateError = String(error);
+    if (!quiet) state.updateDialogOpen = true;
+  } finally {
+    state.updateChecking = false;
+    render();
+  }
+}
+
+async function saveUpdateToken(): Promise<void> {
+  const token = document.querySelector<HTMLInputElement>("#update-token")?.value.trim() ?? "";
+  if (!token) {
+    state.updateError = "GitHub tokenを入力してください。";
+    render();
+    return;
+  }
+  state.updateChecking = true;
+  state.updateError = null;
+  render();
+  try {
+    state.updateAuth = await invoke<UpdateAuthStatus>("save_update_github_token", { token });
+    state.updateChecking = false;
+    await checkForAppUpdate(false);
+  } catch (error) {
+    state.updateChecking = false;
+    state.updateError = String(error);
+    render();
+  }
+}
+
+async function clearUpdateToken(): Promise<void> {
+  try {
+    state.updateAuth = await invoke<UpdateAuthStatus>("clear_update_github_token");
+    state.updateResult = null;
+    state.updateError = state.updateAuth.configured
+      ? `保存済みtokenを削除しました。${state.updateAuth.source === "github-cli" ? "引き続きGitHub CLIの認証を利用します。" : ""}`
+      : null;
+    render();
+  } catch (error) {
+    state.updateError = String(error);
+    render();
+  }
+}
+
+async function installAppUpdate(): Promise<void> {
+  if (!state.updateResult?.available || state.updateInstalling) return;
+  state.updateInstalling = true;
+  state.updateError = null;
+  state.updateDownloaded = 0;
+  state.updateContentLength = null;
+  render();
+  try {
+    await invoke("install_app_update");
+  } catch (error) {
+    state.updateInstalling = false;
+    state.updateError = String(error);
+    render();
+  }
 }
 
 async function refreshCodexStatus(showErrors = false): Promise<CodexRuntimeStatus | null> {
@@ -1581,6 +1828,7 @@ function demoLibrary(): LibraryIndex {
 async function initialize(): Promise<void> {
   applyTheme();
   await setupCodexEventListeners();
+  await setupUpdateIntegration();
   if (isDemoMode) {
     state.library = demoLibrary();
     state.loading = false;
@@ -1624,6 +1872,9 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     if (state.commandOpen) closeCommandPalette();
     else openCommandPalette();
+  } else if (event.key === "Escape" && state.updateDialogOpen && !state.updateInstalling) {
+    event.preventDefault();
+    closeUpdateDialog();
   } else if (event.key === "Escape" && state.commandOpen) {
     event.preventDefault();
     closeCommandPalette();
