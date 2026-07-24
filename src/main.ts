@@ -269,7 +269,7 @@ const state: {
   codexPaperListSelection: 0,
   libraryChangeToken: null,
   libraryLastCheckedAt: null,
-  appVersion: "0.2.0",
+  appVersion: "0.2.1",
   updateAuth: null,
   updateResult: null,
   updateDialogOpen: false,
@@ -549,9 +549,6 @@ function sidebarTemplate(): string {
       <button class="nav-item ${state.starredOnly ? "active" : ""}" data-view="starred">
         <span>${icons.star}スター付き</span><em>${library.stats.starredCount}</em>
       </button>
-      <button class="nav-item ${state.mode === "reviews" ? "active" : ""}" data-view="reviews">
-        <span>${icons.review}継続レビュー</span><em>${state.reviewSummaries.length}</em>
-      </button>
       ${state.codexPaperList ? `<button class="nav-item codex-list-nav ${state.codexPaperListVisible ? "active" : ""}" data-view="codex-list">
         <span>${icons.terminal}Codex リスト</span><em>${state.codexPaperList.papers.length}</em>
       </button>` : ""}
@@ -577,7 +574,7 @@ function railTemplate(): string {
   return `<aside class="app-rail" aria-label="アプリナビゲーション">
     <button class="rail-brand" type="button" data-rail-action="sidebar" title="コレクションを開閉" aria-label="コレクションを開閉">B</button>
     <nav class="rail-nav">
-      <button class="rail-button ${state.mode === "library" && !state.starredOnly ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
+      <button class="rail-button ${state.mode === "library" ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
       <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
       <button class="rail-button ${state.mode === "reviews" ? "active" : ""}" type="button" data-rail-action="reviews" title="継続レビュー" aria-label="継続レビュー">${icons.review}</button>
       <button class="rail-button ${state.codexOpen ? "active" : ""}" type="button" data-rail-action="codex" title="Codex（Ctrl+J）" aria-label="Codexを開閉">${icons.terminal}</button>
@@ -799,7 +796,7 @@ function codexPaneTemplate(): string {
 
   return `<aside class="codex-pane">
     <header class="codex-header">
-      <div><span class="codex-mark">${icons.terminal}</span><p><strong>Codex</strong><small>${escapeHtml(version)} · raw terminal</small></p></div>
+      <div><span class="codex-mark">${icons.terminal}</span><p><strong>Codex</strong><small>${escapeHtml(version)} · embedded PowerShell</small></p></div>
       <div class="codex-header-actions">
         ${status?.running ? `<button class="codex-text-button stop-codex" type="button" title="Codexを終了">終了</button>` : ""}
         <button class="icon-button close-codex" type="button" title="Codexペインを閉じる" aria-label="Codexペインを閉じる">${icons.close}</button>
@@ -1159,7 +1156,6 @@ function bindEvents(): void {
     state.visibleLimit = 120;
     render();
   });
-  document.querySelector<HTMLElement>("[data-view='reviews']")?.addEventListener("click", () => void openReviews());
   document.querySelector<HTMLElement>(".open-review-codex")?.addEventListener("click", () => void updateReviewWithCodex());
   document.querySelectorAll<HTMLElement>("[data-review-id]").forEach((element) => {
     element.addEventListener("click", () => void loadReview(element.dataset.reviewId ?? ""));
@@ -1695,7 +1691,6 @@ async function toggleCodex(force?: boolean): Promise<void> {
     return;
   }
   state.mode = "library";
-  state.listCollapsed = true;
   render();
   const status = await refreshCodexStatus();
   if (status?.available && !status.running) await startCodexTerminal();

@@ -17,7 +17,7 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - 検出できない場合の手動フォルダ選択
 - 外部ワークスペースの初期化・診断・全件走査
 - 開いている外部ワークスペースを VS Code で起動
-- App内のPTYで生のCodex TUIを起動（PaperpileごとのApp管理作業領域、`workspace-write`）
+- App内のPowerShell PTYでCodex TUIを起動（PaperpileごとのApp管理作業領域、`workspace-write`）
 - Viewerで選択中の文献をCodexの作業コンテキストへ設定
 - CodexがMCPで提示した一時文献リストをViewerへ即時表示
 - MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
@@ -84,8 +84,8 @@ Windows 用の署名なし NSIS インストーラーをビルドし、Private G
 添付します。同時にTauri Updater用の`latest.json`と署名を生成します。
 
 ```powershell
-git tag v0.2.0
-git push origin v0.2.0
+git tag v0.2.1
+git push origin v0.2.1
 ```
 
 タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。

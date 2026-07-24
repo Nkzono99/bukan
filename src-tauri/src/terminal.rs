@@ -126,7 +126,7 @@ impl CodexTerminalState {
         let pair = native_pty_system()
             .openpty(size)
             .map_err(|error| format!("Codex用ターミナルを作成できませんでした: {error}"))?;
-        let mut command_builder = command_builder(&command, &workspace_root, &mcp_overrides);
+        let mut command_builder = command_builder(&command, &workspace_root, &mcp_overrides)?;
         command_builder.cwd(&workspace_root);
         command_builder.env("TERM", "xterm-256color");
         command_builder.env("COLORTERM", "truecolor");
@@ -309,69 +309,109 @@ fn command_builder(
     command: &CodexCommand,
     workspace_root: &Path,
     config_overrides: &[String],
-) -> CommandBuilder {
-    match command {
-        CodexCommand::Direct(path) => {
-            let mut builder = CommandBuilder::new(path);
-            builder.arg("-C");
-            builder.arg(workspace_root);
-            builder.arg("--sandbox");
-            builder.arg("workspace-write");
-            builder.arg("--ask-for-approval");
-            builder.arg("on-request");
-            for config_override in config_overrides {
-                builder.arg("--config");
-                builder.arg(config_override);
-            }
-            builder
+) -> Result<CommandBuilder, String> {
+    #[cfg(target_os = "windows")]
+    {
+        let powershell = find_powershell_command().ok_or_else(|| {
+            "PowerShellが見つかりません。PowerShell 7またはWindows PowerShellを確認してください"
+                .to_string()
+        })?;
+        let script = windows_powershell_command_string(command, workspace_root, config_overrides);
+        let mut builder = CommandBuilder::new(powershell);
+        builder.args(["-NoLogo", "-NoProfile", "-NoExit", "-Command"]);
+        builder.arg(script);
+        Ok(builder)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let path = match command {
+            CodexCommand::Direct(path) | CodexCommand::CommandScript(path) => path,
+        };
+        let mut builder = CommandBuilder::new(path);
+        builder.arg("-C");
+        builder.arg(workspace_root);
+        builder.arg("--sandbox");
+        builder.arg("workspace-write");
+        builder.arg("--ask-for-approval");
+        builder.arg("on-request");
+        for config_override in config_overrides {
+            builder.arg("--config");
+            builder.arg(config_override);
         }
-        CodexCommand::CommandScript(path) => {
-            #[cfg(target_os = "windows")]
-            {
-                let mut builder = CommandBuilder::new("cmd.exe");
-                let script = windows_command_string(path, workspace_root, config_overrides);
-                builder.args(["/D", "/S", "/C", script.as_str()]);
-                builder
-            }
-            #[cfg(not(target_os = "windows"))]
-            {
-                let mut builder = CommandBuilder::new(path);
-                builder.arg("-C");
-                builder.arg(workspace_root);
-                builder.arg("--sandbox");
-                builder.arg("workspace-write");
-                builder.arg("--ask-for-approval");
-                builder.arg("on-request");
-                for config_override in config_overrides {
-                    builder.arg("--config");
-                    builder.arg(config_override);
-                }
-                builder
-            }
-        }
+        Ok(builder)
     }
 }
 
 #[cfg(target_os = "windows")]
-fn windows_command_string(
-    command: &Path,
+fn find_powershell_command() -> Option<PathBuf> {
+    for command in ["pwsh.exe", "powershell.exe"] {
+        if let Ok(output) = Command::new("where.exe").arg(command).output() {
+            if output.status.success() {
+                if let Some(path) = String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(str::trim)
+                    .find(|line| !line.is_empty())
+                {
+                    return Some(PathBuf::from(path));
+                }
+            }
+        }
+    }
+
+    let program_files = std::env::var_os("ProgramFiles").map(PathBuf::from);
+    if let Some(path) = program_files
+        .as_ref()
+        .map(|root| root.join("PowerShell").join("7").join("pwsh.exe"))
+        .filter(|path| path.is_file())
+    {
+        return Some(path);
+    }
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .map(|root| {
+            root.join("System32")
+                .join("WindowsPowerShell")
+                .join("v1.0")
+                .join("powershell.exe")
+        })
+        .filter(|path| path.is_file())
+}
+
+#[cfg(target_os = "windows")]
+fn windows_powershell_command_string(
+    command: &CodexCommand,
     workspace_root: &Path,
     config_overrides: &[String],
 ) -> String {
-    fn escape_percent(value: &str) -> String {
-        value.replace('%', "%%")
+    fn quote(value: &str) -> String {
+        format!("'{}'", value.replace('\'', "''"))
     }
-    let mut value = format!(
-        "\"{}\" -C \"{}\" --sandbox workspace-write --ask-for-approval on-request",
-        escape_percent(&command.to_string_lossy()),
-        escape_percent(&workspace_root.to_string_lossy())
-    );
+
+    let command = match command {
+        CodexCommand::Direct(path) | CodexCommand::CommandScript(path) => path,
+    };
+    let mut arguments = vec![
+        "-C".to_string(),
+        workspace_root.to_string_lossy().into_owned(),
+        "--sandbox".to_string(),
+        "workspace-write".to_string(),
+        "--ask-for-approval".to_string(),
+        "on-request".to_string(),
+    ];
     for config_override in config_overrides {
-        value.push_str(" --config \"");
-        value.push_str(&escape_percent(config_override));
-        value.push('"');
+        arguments.push("--config".to_string());
+        arguments.push(config_override.clone());
     }
-    value
+    let arguments = arguments
+        .iter()
+        .map(|argument| quote(argument))
+        .collect::<Vec<_>>()
+        .join(" ");
+    format!(
+        "& {} {}; if ($LASTEXITCODE -ne 0) {{ Write-Host \"`nCodex exited with code $LASTEXITCODE\" -ForegroundColor Yellow }}",
+        quote(&command.to_string_lossy()),
+        arguments
+    )
 }
 
 fn mcp_config_overrides(workspace_root: &Path) -> Result<Vec<String>, String> {
@@ -579,18 +619,22 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn quotes_windows_codex_command_paths() {
-        let command = windows_command_string(
-            Path::new(r"C:\Users\Test User\AppData\Roaming\npm\codex.cmd"),
+    fn launches_codex_inside_powershell_with_quoted_paths() {
+        let command = windows_powershell_command_string(
+            &CodexCommand::CommandScript(PathBuf::from(
+                r"C:\Users\Test User\AppData\Roaming\npm\codex.cmd",
+            )),
             Path::new(r"G:\マイドライブ\Bukan Workspaces\Lunar 100%"),
             &[
                 "mcp_servers.bukan.command='C:\\Program Files\\Bukan\\bukan.exe'".to_string(),
                 "mcp_servers.bukan.args=['--bukan-mcp-stdio']".to_string(),
             ],
         );
-        assert!(command.contains("\"C:\\Users\\Test User"));
-        assert!(command.contains("Lunar 100%%\""));
-        assert!(command.contains("--sandbox workspace-write"));
+        assert!(command.contains("& 'C:\\Users\\Test User"));
+        assert!(command.contains("'G:\\マイドライブ\\Bukan Workspaces\\Lunar 100%'"));
+        assert!(command.contains("'--sandbox' 'workspace-write'"));
         assert!(command.contains("mcp_servers.bukan.command="));
+        assert!(command.contains("''C:\\Program Files\\Bukan\\bukan.exe''"));
+        assert!(command.contains("$LASTEXITCODE"));
     }
 }

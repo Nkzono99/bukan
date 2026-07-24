@@ -27,9 +27,10 @@ my-research/
 
 ## Codexターミナル
 
-Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしてCodex CLIを
-PTY上で起動します。表示されるのはCodexの生のTUIであり、Bukan独自のチャットUIへ
-変換しません。
+Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしたPowerShell
+PTYを埋め込み、その中でCodex CLIを起動します。PowerShell 7を優先し、見つからない
+場合はWindows PowerShellを使用します。表示されるのはCodexの生のTUIであり、
+Bukan独自のチャットUIへ変換しません。Codex終了後はPowerShellプロンプトへ戻ります。
 
 起動時は `workspace-write` サンドボックスと `on-request` 承認を明示します。
 Paperpile同期フォルダを追加の書き込み可能ディレクトリには設定しません。
