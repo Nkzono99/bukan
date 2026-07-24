@@ -215,7 +215,7 @@ async fn check_with_github_token(
         .map_err(|error| format!("更新メタデータを読み取れませんでした: {error}"))?;
 
     if let Some(update) = update.as_mut() {
-        let installer = release_asset_for_download(&release, update)
+        let installer = release_asset_for_download(&release, update.download_url.as_str())
             .ok_or_else(|| "更新インストーラーがGitHub Release assetsにありません".to_string())?;
         update.download_url = installer
             .url
@@ -260,14 +260,14 @@ async fn fetch_latest_release(token: &str) -> Result<GithubRelease, String> {
 
 fn release_asset_for_download<'a>(
     release: &'a GithubRelease,
-    update: &Update,
+    download_url: &str,
 ) -> Option<&'a GithubReleaseAsset> {
-    let download_url = update.download_url.as_str();
-    let file_name = update.download_url.path_segments()?.next_back()?;
-    release
-        .assets
-        .iter()
-        .find(|asset| asset.browser_download_url == download_url || asset.name == file_name)
+    let file_name = download_url.rsplit('/').next()?;
+    release.assets.iter().find(|asset| {
+        asset.url == download_url
+            || asset.browser_download_url == download_url
+            || asset.name == file_name
+    })
 }
 
 #[tauri::command]
@@ -473,5 +473,33 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].source, "environment");
+    }
+
+    #[test]
+    fn matches_private_release_installer_by_github_asset_api_url() {
+        let release = GithubRelease {
+            assets: vec![GithubReleaseAsset {
+                name: "Bukan_0.2.1_x64-setup.exe".to_string(),
+                url: "https://api.github.com/repos/Nkzono99/bukan/releases/assets/488100746"
+                    .to_string(),
+                browser_download_url:
+                    "https://github.com/Nkzono99/bukan/releases/download/v0.2.1/Bukan_0.2.1_x64-setup.exe"
+                        .to_string(),
+            }],
+        };
+
+        let matched = release_asset_for_download(
+            &release,
+            "https://api.github.com/repos/Nkzono99/bukan/releases/assets/488100746",
+        )
+        .expect("API asset URL should match");
+        assert_eq!(matched.name, "Bukan_0.2.1_x64-setup.exe");
+
+        let legacy_matched = release_asset_for_download(
+            &release,
+            "https://github.com/Nkzono99/bukan/releases/download/v0.2.1/Bukan_0.2.1_x64-setup.exe",
+        )
+        .expect("legacy clients should match the browser download URL");
+        assert_eq!(legacy_matched.name, "Bukan_0.2.1_x64-setup.exe");
     }
 }

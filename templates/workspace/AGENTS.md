@@ -21,6 +21,9 @@
 - Use hierarchical `Bukan/` folders for fields, topics, objects, missions, and projects.
 - Use flat `bukan:` labels for methods, reference types, workflow status, and keywords.
 - Review generated organization suggestions before applying them in Paperpile.
+- Workspace-only collection assignments live in `data/collections.json`. They may be
+  edited through Bukan, but must never be treated as authorization to modify the
+  corresponding Paperpile collection tree.
 
 ## Bukan and Codex
 

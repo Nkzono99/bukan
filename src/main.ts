@@ -42,6 +42,17 @@ interface LibraryIndex {
   warnings: string[];
 }
 
+interface WorkspaceCollection {
+  path: string;
+  paperIds: string[];
+}
+
+interface WorkspaceCollectionIndex {
+  version: number;
+  initializedFrom: string;
+  collections: WorkspaceCollection[];
+}
+
 interface WorkspaceDescriptor {
   root: string;
   name: string;
@@ -160,7 +171,10 @@ interface ReviewDocument {
 interface CollectionNode {
   name: string;
   path: string;
+  source: "paperpile" | "workspace";
+  collectionPath: string | null;
   paperIds: Set<string>;
+  directPaperIds: Set<string>;
   children: Map<string, CollectionNode>;
 }
 
@@ -188,6 +202,7 @@ const state: {
   scanning: boolean;
   locations: LibraryLocation[];
   library: LibraryIndex | null;
+  workspaceCollections: WorkspaceCollectionIndex | null;
   workspaceRoot: string | null;
   workspaceName: string | null;
   managedWorkspace: boolean;
@@ -200,6 +215,8 @@ const state: {
   visibleLimit: number;
   error: string | null;
   collapsedCollections: Set<string>;
+  creatingCollection: boolean;
+  collectionSaving: boolean;
   theme: ThemeMode;
   sidebarCollapsed: boolean;
   sidebarWidth: number;
@@ -236,6 +253,7 @@ const state: {
   scanning: false,
   locations: [],
   library: null,
+  workspaceCollections: null,
   workspaceRoot: null,
   workspaceName: null,
   managedWorkspace: false,
@@ -248,6 +266,8 @@ const state: {
   visibleLimit: 120,
   error: null,
   collapsedCollections: new Set<string>(),
+  creatingCollection: false,
+  collectionSaving: false,
   theme: (localStorage.getItem("bukan.theme") as ThemeMode | null) ?? "system",
   sidebarCollapsed: false,
   sidebarWidth: storedWidth("bukan.sidebarWidth", SIDEBAR_WIDTH),
@@ -269,7 +289,7 @@ const state: {
   codexPaperListSelection: 0,
   libraryChangeToken: null,
   libraryLastCheckedAt: null,
-  appVersion: "0.2.1",
+  appVersion: "0.2.2",
   updateAuth: null,
   updateResult: null,
   updateDialogOpen: false,
@@ -305,6 +325,14 @@ const icons = {
 
 const codexTerminalHost = document.createElement("div");
 codexTerminalHost.className = "codex-terminal-host";
+const pdfPreviewHost = document.createElement("div");
+pdfPreviewHost.className = "pdf-preview-host";
+pdfPreviewHost.hidden = true;
+document.body.append(pdfPreviewHost);
+let pdfPreviewPaperId: string | null = null;
+let pdfPreviewPath: string | null = null;
+let pdfPreviewRevision = 0;
+let pdfPreviewResizeObserver: ResizeObserver | null = null;
 let codexTerminal: Terminal | null = null;
 let codexFitAddon: FitAddon | null = null;
 let codexResizeObserver: ResizeObserver | null = null;
@@ -408,48 +436,117 @@ function displayCollectionPath(collection: string): string {
   return parts.join(" / ");
 }
 
-function buildCollectionTree(library: LibraryIndex): CollectionNode[] {
-  const roots = new Map<string, CollectionNode>();
-  for (const paper of library.papers) {
-    for (const originalCollection of paper.collections) {
-      const displayPath = displayCollectionPath(originalCollection);
-      if (!displayPath) continue;
-      const parts = displayPath.split(" / ");
-      let siblings = roots;
-      let accumulated = "";
-      for (const part of parts) {
-        accumulated = accumulated ? `${accumulated} / ${part}` : part;
-        let node = siblings.get(part);
-        if (!node) {
-          node = { name: part, path: accumulated, paperIds: new Set<string>(), children: new Map<string, CollectionNode>() };
-          siblings.set(part, node);
-        }
-        node.paperIds.add(paper.id);
-        siblings = node.children;
+function buildSourceCollectionTree(
+  source: "paperpile" | "workspace",
+  assignments: Array<{ path: string; paperIds: Iterable<string> }>,
+  allPaperIds: Iterable<string>,
+): CollectionNode {
+  const sourceName = source === "paperpile" ? "Paperpile" : "Workspace";
+  const allIds = new Set(allPaperIds);
+  const root: CollectionNode = {
+    name: sourceName,
+    path: sourceName,
+    source,
+    collectionPath: null,
+    paperIds: new Set(allIds),
+    directPaperIds: new Set(),
+    children: new Map(),
+  };
+  const all: CollectionNode = {
+    name: "All",
+    path: `${sourceName} / All`,
+    source,
+    collectionPath: null,
+    paperIds: new Set(allIds),
+    directPaperIds: new Set(),
+    children: new Map(),
+  };
+  root.children.set("All", all);
+
+  for (const assignment of assignments) {
+    const displayPath = displayCollectionPath(assignment.path);
+    if (!displayPath) continue;
+    const assignedIds = new Set(assignment.paperIds);
+    const parts = displayPath.split(" / ");
+    let siblings = all.children;
+    let accumulated = "";
+    for (const part of parts) {
+      accumulated = accumulated ? `${accumulated} / ${part}` : part;
+      let node = siblings.get(part);
+      if (!node) {
+        node = {
+          name: part,
+          path: `${sourceName} / All / ${accumulated}`,
+          source,
+          collectionPath: accumulated,
+          paperIds: new Set(),
+          directPaperIds: new Set(),
+          children: new Map(),
+        };
+        siblings.set(part, node);
       }
+      assignedIds.forEach((paperId) => node?.paperIds.add(paperId));
+      if (accumulated === displayPath) node.directPaperIds = new Set(assignedIds);
+      siblings = node.children;
     }
   }
+
   const sortNodes = (nodes: Iterable<CollectionNode>): CollectionNode[] => [...nodes].sort((left, right) => left.name.localeCompare(right.name, "ja"));
   const finalize = (nodes: Iterable<CollectionNode>): CollectionNode[] => sortNodes(nodes).map((node) => {
     const children = finalize(node.children.values());
     node.children = new Map(children.map((child) => [child.name, child]));
     return node;
   });
-  return finalize(roots.values());
+  all.children = new Map(finalize(all.children.values()).map((node) => [node.name, node]));
+  return root;
+}
+
+function buildCollectionTree(library: LibraryIndex): CollectionNode[] {
+  const paperpileAssignments = new Map<string, Set<string>>();
+  for (const paper of library.papers) {
+    for (const originalCollection of paper.collections) {
+      const displayPath = displayCollectionPath(originalCollection);
+      if (!displayPath) continue;
+      const paperIds = paperpileAssignments.get(displayPath) ?? new Set<string>();
+      paperIds.add(paper.id);
+      paperpileAssignments.set(displayPath, paperIds);
+    }
+  }
+  const workspaceAssignments = state.workspaceCollections?.collections.map((collection) => ({
+    path: collection.path,
+    paperIds: collection.paperIds,
+  })) ?? [];
+  const allPaperIds = library.papers.map((paper) => paper.id);
+  return [
+    buildSourceCollectionTree(
+      "paperpile",
+      [...paperpileAssignments].map(([path, paperIds]) => ({ path, paperIds })),
+      allPaperIds,
+    ),
+    buildSourceCollectionTree("workspace", workspaceAssignments, allPaperIds),
+  ];
 }
 
 function collectionTreeItemTemplate(node: CollectionNode, depth = 0): string {
   const children = [...node.children.values()];
   const hasChildren = children.length > 0;
   const collapsed = state.collapsedCollections.has(node.path);
+  const selectedPaperIsMember = !!state.selectedId && node.directPaperIds.has(state.selectedId);
+  const membershipAction = node.source === "workspace" && node.collectionPath && state.selectedId
+    ? `<button class="collection-membership ${selectedPaperIsMember ? "included" : ""}" type="button"
+        data-workspace-membership="${escapeHtml(node.collectionPath)}" data-member="${selectedPaperIsMember ? "false" : "true"}"
+        title="${selectedPaperIsMember ? "選択中の文献を外す" : "選択中の文献を追加"}"
+        aria-label="${selectedPaperIsMember ? "選択中の文献を外す" : "選択中の文献を追加"}">${selectedPaperIsMember ? "✓" : "+"}</button>`
+    : "";
   return `<div class="collection-node ${collapsed ? "collapsed" : ""}">
-    <div class="collection-node-row ${state.collection === node.path ? "active" : ""}" style="--tree-indent:${depth * 12}px">
+    <div class="collection-node-row ${state.collection === node.path ? "active" : ""} ${depth === 0 ? "collection-root-row" : ""}" style="--tree-depth:${depth}">
       ${hasChildren
         ? `<button class="collection-toggle" data-collection-toggle="${escapeHtml(node.path)}" aria-label="${collapsed ? "展開" : "折りたたむ"}" aria-expanded="${!collapsed}">${icons.chevron}</button>`
         : `<span class="collection-toggle-spacer"></span>`}
       <button class="collection-select" data-collection="${escapeHtml(node.path)}" title="${escapeHtml(node.path)}">
         ${icons.folder}<i>${escapeHtml(node.name)}</i><em>${node.paperIds.size}</em>
       </button>
+      ${membershipAction}
     </div>
     ${hasChildren ? `<div class="collection-children">${children.map((child) => collectionTreeItemTemplate(child, depth + 1)).join("")}</div>` : ""}
   </div>`;
@@ -464,10 +561,22 @@ function filteredPapers(): PaperRecord[] {
   const terms = state.query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
   const papers = state.library.papers.filter((paper) => {
     if (state.starredOnly && !paper.starred) return false;
-    if (state.collection && !paper.collections.some((collection) => {
-      const displayPath = displayCollectionPath(collection);
-      return displayPath === state.collection || displayPath.startsWith(`${state.collection} / `);
-    })) return false;
+    if (state.collection) {
+      const parts = state.collection.split(" / ");
+      const source = parts[0];
+      const selectedPath = parts.slice(2).join(" / ");
+      if (selectedPath && source === "Paperpile" && !paper.collections.some((collection) => {
+        const displayPath = displayCollectionPath(collection);
+        return displayPath === selectedPath || displayPath.startsWith(`${selectedPath} / `);
+      })) return false;
+      if (selectedPath && source === "Workspace") {
+        const included = state.workspaceCollections?.collections.some((collection) =>
+          (collection.path === selectedPath || collection.path.startsWith(`${selectedPath} / `))
+          && collection.paperIds.includes(paper.id)
+        );
+        if (!included) return false;
+      }
+    }
     if (!terms.length) return true;
     const haystack = [
       paper.title,
@@ -475,6 +584,9 @@ function filteredPapers(): PaperRecord[] {
       paper.year?.toString() ?? "",
       paper.fileName,
       ...paper.collections,
+      ...(state.workspaceCollections?.collections
+        .filter((collection) => collection.paperIds.includes(paper.id))
+        .map((collection) => collection.path) ?? []),
     ].join(" ").toLocaleLowerCase();
     return terms.every((term) => haystack.includes(term));
   });
@@ -552,7 +664,12 @@ function sidebarTemplate(): string {
       ${state.codexPaperList ? `<button class="nav-item codex-list-nav ${state.codexPaperListVisible ? "active" : ""}" data-view="codex-list">
         <span>${icons.terminal}Codex リスト</span><em>${state.codexPaperList.papers.length}</em>
       </button>` : ""}
-      <p class="nav-label collections-label">コレクション <em>${visibleCollectionCount}</em></p>
+      <p class="nav-label collections-label"><span>コレクション</span><span class="collection-label-actions"><em>${visibleCollectionCount}</em><button class="new-workspace-collection" type="button" title="Workspaceコレクションを作成" aria-label="Workspaceコレクションを作成">+</button></span></p>
+      ${state.creatingCollection ? `<form class="workspace-collection-form">
+        <input id="workspace-collection-path" type="text" placeholder="例: レビュー / 手法" maxlength="512" autocomplete="off" />
+        <button type="submit" ${state.collectionSaving ? "disabled" : ""}>作成</button>
+        <button class="cancel-workspace-collection" type="button" aria-label="キャンセル">×</button>
+      </form>` : ""}
       <div class="collection-list">
         ${collectionTree.map((node) => collectionTreeItemTemplate(node)).join("")}
       </div>
@@ -653,6 +770,73 @@ function paperRowTemplate(paper: PaperRecord): string {
   </button>`;
 }
 
+function pdfPreviewMarkup(paper: PaperRecord): string {
+  if ("__TAURI_INTERNALS__" in window) {
+    const previewUrl = `${convertFileSrc(paper.path)}#pagemode=bookmarks`;
+    return `<object class="pdf-object" data="${escapeHtml(previewUrl)}" type="application/pdf">
+      <div class="pdf-fallback"><p>PDF プレビューを表示できませんでした。</p><button class="action-button persistent-open-external">${icons.external}既定のアプリで開く</button></div>
+    </object>
+    <div class="pdf-loading" role="status">
+      <span class="reading-spinner"><i></i><i></i><i></i></span>
+      <strong>PDF を読み込んでいます</strong>
+      <small>Google Drive 上のファイルを準備しています</small>
+    </div>`;
+  }
+  return `<div class="demo-pdf-page" aria-label="PDF preview placeholder">
+    <small>BUKAN · READING PREVIEW</small><h3>${escapeHtml(paper.title)}</h3>
+    <p>${escapeHtml(paper.authors ?? "")}${paper.year ? ` · ${paper.year}` : ""}</p>
+    <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+  </div>`;
+}
+
+function updatePdfPreview(paper: PaperRecord): void {
+  if (pdfPreviewPaperId === paper.id && pdfPreviewPath === paper.path) return;
+  pdfPreviewPaperId = paper.id;
+  pdfPreviewPath = paper.path;
+  pdfPreviewRevision += 1;
+  pdfPreviewHost.dataset.previewPaperId = paper.id;
+  pdfPreviewHost.dataset.revision = String(pdfPreviewRevision);
+  pdfPreviewHost.innerHTML = pdfPreviewMarkup(paper);
+  pdfPreviewHost.querySelector<HTMLElement>(".persistent-open-external")?.addEventListener("click", () => {
+    void runPaperAction("open_paper");
+  });
+  const pdfObject = pdfPreviewHost.querySelector<HTMLObjectElement>(".pdf-object");
+  const pdfLoading = pdfPreviewHost.querySelector<HTMLElement>(".pdf-loading");
+  if (!pdfObject || !pdfLoading) return;
+  pdfObject.addEventListener("load", () => pdfLoading.classList.add("loaded"), { once: true });
+  pdfObject.addEventListener("error", () => {
+    pdfLoading.classList.add("failed");
+    const title = pdfLoading.querySelector("strong");
+    const detail = pdfLoading.querySelector("small");
+    if (title) title.textContent = "プレビューを読み込めませんでした";
+    if (detail) detail.textContent = "「別ウィンドウで開く」をお試しください";
+  }, { once: true });
+}
+
+function attachPdfPreview(): void {
+  const mount = document.querySelector<HTMLElement>(".pdf-preview-mount");
+  const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
+  pdfPreviewResizeObserver?.disconnect();
+  if (!mount || !paper) {
+    pdfPreviewHost.hidden = true;
+    return;
+  }
+  updatePdfPreview(paper);
+  pdfPreviewHost.hidden = false;
+  const positionPreview = () => {
+    if (!mount.isConnected || pdfPreviewHost.hidden) return;
+    const bounds = mount.getBoundingClientRect();
+    pdfPreviewHost.style.left = `${bounds.left}px`;
+    pdfPreviewHost.style.top = `${bounds.top}px`;
+    pdfPreviewHost.style.width = `${bounds.width}px`;
+    pdfPreviewHost.style.height = `${bounds.height}px`;
+  };
+  positionPreview();
+  pdfPreviewResizeObserver = new ResizeObserver(positionPreview);
+  pdfPreviewResizeObserver.observe(mount);
+  window.requestAnimationFrame(positionPreview);
+}
+
 function viewerTemplate(): string {
   const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
   if (!paper) {
@@ -664,21 +848,6 @@ function viewerTemplate(): string {
     </section>`;
   }
 
-  const isDesktopRuntime = "__TAURI_INTERNALS__" in window;
-  const pdfContent = isDesktopRuntime
-    ? `<object id="pdf-object" class="pdf-object" data="${escapeHtml(convertFileSrc(paper.path))}" type="application/pdf">
-        <div class="pdf-fallback"><p>PDF プレビューを表示できませんでした。</p><button class="action-button open-external">${icons.external}既定のアプリで開く</button></div>
-      </object>
-      <div id="pdf-loading" class="pdf-loading" role="status">
-        <span class="reading-spinner"><i></i><i></i><i></i></span>
-        <strong>PDF を読み込んでいます</strong>
-        <small>Google Drive 上のファイルを準備しています</small>
-      </div>`
-    : `<div class="demo-pdf-page" aria-label="PDF preview placeholder">
-        <small>BUKAN · READING PREVIEW</small><h3>${escapeHtml(paper.title)}</h3>
-        <p>${escapeHtml(paper.authors ?? "")}${paper.year ? ` · ${paper.year}` : ""}</p>
-        <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
-      </div>`;
   return `<section class="viewer">
     <header class="viewer-header">
       <div class="viewer-title-wrap">
@@ -699,7 +868,7 @@ function viewerTemplate(): string {
       ${paper.starred ? `<span class="detail-star">${icons.star}<strong>STARRED</strong></span>` : ""}
     </div>
     <div class="pdf-stage">
-      ${pdfContent}
+      <div class="pdf-preview-mount"></div>
     </div>
   </section>`;
 }
@@ -1001,6 +1170,7 @@ function render(): void {
   else if (!state.library) content = onboardingTemplate();
   else content = workspaceTemplate();
   app.innerHTML = content + updateDialogTemplate();
+  attachPdfPreview();
   bindEvents();
   attachCodexTerminal();
 }
@@ -1127,6 +1297,7 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLElement>("[data-library-path]").forEach((element) => {
     element.addEventListener("click", () => {
       state.workspaceRoot = null;
+      state.workspaceCollections = null;
       state.workspaceName = null;
       state.managedWorkspace = false;
       state.codexPaperList = null;
@@ -1143,6 +1314,7 @@ function bindEvents(): void {
   document.querySelector<HTMLElement>(".open-workspace")?.addEventListener("click", () => void chooseWorkspace(false));
   document.querySelector<HTMLElement>(".create-workspace")?.addEventListener("click", () => void chooseWorkspace(true));
   document.querySelector<HTMLElement>("[data-view='all']")?.addEventListener("click", () => {
+    if (state.mode === "library" && !state.collection && !state.starredOnly) return;
     state.mode = "library";
     state.collection = null;
     state.starredOnly = false;
@@ -1150,6 +1322,7 @@ function bindEvents(): void {
     render();
   });
   document.querySelector<HTMLElement>("[data-view='starred']")?.addEventListener("click", () => {
+    if (state.mode === "library" && !state.collection && state.starredOnly) return;
     state.mode = "library";
     state.collection = null;
     state.starredOnly = true;
@@ -1173,11 +1346,36 @@ function bindEvents(): void {
   document.querySelector<HTMLElement>(".review-with-codex")?.addEventListener("click", () => void updateReviewWithCodex());
   document.querySelectorAll<HTMLElement>("[data-collection]").forEach((element) => {
     element.addEventListener("click", () => {
-      state.collection = element.dataset.collection ?? null;
+      const collection = element.dataset.collection ?? null;
+      if (state.mode === "library" && state.collection === collection && !state.starredOnly) return;
+      state.collection = collection;
       state.mode = "library";
       state.starredOnly = false;
       state.visibleLimit = 120;
       render();
+    });
+  });
+  document.querySelector<HTMLElement>(".new-workspace-collection")?.addEventListener("click", () => {
+    state.creatingCollection = true;
+    render();
+    window.setTimeout(() => document.querySelector<HTMLInputElement>("#workspace-collection-path")?.focus(), 0);
+  });
+  document.querySelector<HTMLElement>(".cancel-workspace-collection")?.addEventListener("click", () => {
+    state.creatingCollection = false;
+    render();
+  });
+  document.querySelector<HTMLFormElement>(".workspace-collection-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const path = document.querySelector<HTMLInputElement>("#workspace-collection-path")?.value.trim() ?? "";
+    void createWorkspaceCollection(path);
+  });
+  document.querySelectorAll<HTMLElement>("[data-workspace-membership]").forEach((element) => {
+    element.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void updateWorkspaceCollectionMembership(
+        element.dataset.workspaceMembership ?? "",
+        element.dataset.member === "true",
+      );
     });
   });
   document.querySelectorAll<HTMLElement>("[data-collection-toggle]").forEach((element) => {
@@ -1191,7 +1389,9 @@ function bindEvents(): void {
   });
   document.querySelectorAll<HTMLElement>("[data-paper-id]").forEach((element) => {
     element.addEventListener("click", () => {
-      state.selectedId = element.dataset.paperId ?? null;
+      const paperId = element.dataset.paperId ?? null;
+      if (state.selectedId === paperId) return;
+      state.selectedId = paperId;
       render();
     });
   });
@@ -1220,19 +1420,6 @@ function bindEvents(): void {
     element.addEventListener("click", () => void runPaperAction("open_paper"));
   });
   document.querySelector<HTMLElement>(".reveal-paper")?.addEventListener("click", () => void runPaperAction("reveal_paper"));
-  const pdfObject = document.querySelector<HTMLObjectElement>("#pdf-object");
-  const pdfLoading = document.querySelector<HTMLElement>("#pdf-loading");
-  if (pdfObject && pdfLoading) {
-    const finishPdfLoad = () => pdfLoading.classList.add("loaded");
-    pdfObject.addEventListener("load", finishPdfLoad, { once: true });
-    pdfObject.addEventListener("error", () => {
-      pdfLoading.classList.add("failed");
-      const title = pdfLoading.querySelector("strong");
-      const detail = pdfLoading.querySelector("small");
-      if (title) title.textContent = "プレビューを読み込めませんでした";
-      if (detail) detail.textContent = "「別ウィンドウで開く」をお試しください";
-    }, { once: true });
-  }
 }
 
 function bindResizeHandles(): void {
@@ -1282,6 +1469,47 @@ function bindResizeHandles(): void {
       render();
     });
   });
+}
+
+async function createWorkspaceCollection(path: string): Promise<void> {
+  if (!state.workspaceRoot || !path || state.collectionSaving) return;
+  state.collectionSaving = true;
+  render();
+  try {
+    state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("create_workspace_collection", {
+      workspaceRoot: state.workspaceRoot,
+      collectionPath: path,
+    });
+    state.creatingCollection = false;
+    showToast(`Workspace / All / ${displayCollectionPath(path)} を作成しました`);
+  } catch (error) {
+    showToast(String(error), true);
+  } finally {
+    state.collectionSaving = false;
+    render();
+  }
+}
+
+async function updateWorkspaceCollectionMembership(path: string, member: boolean): Promise<void> {
+  if (!state.workspaceRoot || !state.selectedId || !path || state.collectionSaving) return;
+  const paperId = state.selectedId;
+  state.collectionSaving = true;
+  try {
+    state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("set_workspace_collection_membership", {
+      workspaceRoot: state.workspaceRoot,
+      collectionPath: path,
+      paperId,
+      member,
+    });
+    showToast(member
+      ? "選択中の文献をWorkspaceコレクションへ追加しました"
+      : "選択中の文献をWorkspaceコレクションから外しました");
+  } catch (error) {
+    showToast(String(error), true);
+  } finally {
+    state.collectionSaving = false;
+    render();
+  }
 }
 
 function openCommandPalette(): void {
@@ -1903,6 +2131,7 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
     await invoke("stop_codex_terminal");
   }
   state.workspaceRoot = descriptor.root;
+  state.workspaceCollections = null;
   state.workspaceName = descriptor.name;
   state.managedWorkspace = false;
   state.codexStatus = null;
@@ -1946,6 +2175,20 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
       }
     }
     state.library = index;
+    if (state.workspaceRoot) {
+      try {
+        state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("load_workspace_collections", {
+          workspaceRoot: state.workspaceRoot,
+          seeds: index.papers.map((paper) => ({
+            paperId: paper.id,
+            collections: paper.collections,
+          })),
+        });
+      } catch (error) {
+        console.warn("Could not load Workspace collections", error);
+        showToast(`Workspaceコレクションを読み取れませんでした: ${String(error)}`, true);
+      }
+    }
     await refreshReviews();
     state.selectedId = state.selectedId && index.papers.some((paper) => paper.id === state.selectedId) ? state.selectedId : null;
     localStorage.setItem("bukan.paperpileRoot", index.root);
@@ -2119,6 +2362,16 @@ async function initialize(): Promise<void> {
   await setupUpdateIntegration();
   if (isDemoMode) {
     state.library = demoLibrary();
+    state.workspaceCollections = {
+      version: 1,
+      initializedFrom: "paperpile",
+      collections: [
+        { path: "月の水資源 / 観測", paperIds: ["demo-1"] },
+        { path: "月面環境 / 月面帯電", paperIds: ["demo-2"] },
+        { path: "ミッション / かぐや観測解析", paperIds: ["demo-3"] },
+        { path: "Methods / Numerical", paperIds: ["demo-4"] },
+      ],
+    };
     state.workspaceRoot = "C:\\demo\\workspace";
     state.workspaceName = "Bukan";
     if (new URLSearchParams(window.location.search).has("reviews")) {

@@ -17,6 +17,7 @@ pub mod reviews;
 pub mod terminal;
 pub mod updates;
 pub mod workspace;
+pub mod workspace_collections;
 
 #[derive(Default)]
 struct AppState {
@@ -117,6 +118,37 @@ fn initialize_workspace(
 #[tauri::command]
 fn open_workspace(root: String) -> Result<workspace::WorkspaceDescriptor, String> {
     workspace::describe_workspace(Path::new(&root))
+}
+
+#[tauri::command]
+fn load_workspace_collections(
+    workspace_root: String,
+    seeds: Vec<workspace_collections::PaperCollectionSeed>,
+) -> Result<workspace_collections::WorkspaceCollectionIndex, String> {
+    workspace_collections::load_or_initialize(Path::new(&workspace_root), &seeds)
+}
+
+#[tauri::command]
+fn create_workspace_collection(
+    workspace_root: String,
+    collection_path: String,
+) -> Result<workspace_collections::WorkspaceCollectionIndex, String> {
+    workspace_collections::create_collection(Path::new(&workspace_root), &collection_path)
+}
+
+#[tauri::command]
+fn set_workspace_collection_membership(
+    workspace_root: String,
+    collection_path: String,
+    paper_id: String,
+    member: bool,
+) -> Result<workspace_collections::WorkspaceCollectionIndex, String> {
+    workspace_collections::set_membership(
+        Path::new(&workspace_root),
+        &collection_path,
+        &paper_id,
+        member,
+    )
 }
 
 #[tauri::command]
@@ -222,23 +254,27 @@ fn open_workspace_in_vscode(app: AppHandle, workspace_root: String) -> Result<()
 }
 
 #[tauri::command]
-fn codex_runtime_status(
-    state: State<'_, AppState>,
-) -> Result<terminal::CodexRuntimeStatus, String> {
-    state.terminal.status()
+async fn codex_runtime_status(app: AppHandle) -> Result<terminal::CodexRuntimeStatus, String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().terminal.status())
+        .await
+        .map_err(|error| format!("Codexの確認処理を完了できませんでした: {error}"))?
 }
 
 #[tauri::command]
-fn start_codex_terminal(
+async fn start_codex_terminal(
     app: AppHandle,
-    state: State<'_, AppState>,
     workspace_root: String,
     cols: Option<u16>,
     rows: Option<u16>,
 ) -> Result<terminal::CodexRuntimeStatus, String> {
-    state
-        .terminal
-        .start(app, Path::new(&workspace_root), cols, rows)
+    let event_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<AppState>()
+            .terminal
+            .start(event_app, Path::new(&workspace_root), cols, rows)
+    })
+    .await
+    .map_err(|error| format!("Codexの起動処理を完了できませんでした: {error}"))?
 }
 
 #[tauri::command]
@@ -252,8 +288,10 @@ fn resize_codex_terminal(state: State<'_, AppState>, cols: u16, rows: u16) -> Re
 }
 
 #[tauri::command]
-fn stop_codex_terminal(state: State<'_, AppState>) -> Result<(), String> {
-    state.terminal.stop()
+async fn stop_codex_terminal(app: AppHandle) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || app.state::<AppState>().terminal.stop())
+        .await
+        .map_err(|error| format!("Codexの終了処理を完了できませんでした: {error}"))?
 }
 
 #[tauri::command]
@@ -688,6 +726,9 @@ pub fn run() {
             detect_libraries,
             initialize_workspace,
             open_workspace,
+            load_workspace_collections,
+            create_workspace_collection,
+            set_workspace_collection_membership,
             list_research_reviews,
             get_research_review,
             save_research_review,

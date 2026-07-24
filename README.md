@@ -9,15 +9,17 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - Windows の全ドライブから `マイドライブ/Paperpile` または
   `My Drive/Paperpile` を自動検出
 - `All Papers` 以下をコレクションとして索引化
+- `Paperpile / All` と `Workspace / All` を分離し、初回だけPaperpileの階層をWorkspaceへ複製
+- Workspace側のコレクション作成・文献割り当て（Paperpileには書き戻さない）
 - 書誌ファイル名とサイズに基づく安定IDで、コレクション間の同一文献を統合
 - `Starred Papers` と照合
 - タイトル、著者、年、コレクションの横断検索
 - コレクション、スター、更新日、タイトル、出版年による絞り込み・並び替え
-- PDF のアプリ内表示、既定アプリでの表示、エクスプローラーでの表示
+- PDF のアプリ内表示（選択状態と目次を再描画時も保持）、既定アプリでの表示、エクスプローラーでの表示
 - 検出できない場合の手動フォルダ選択
 - 外部ワークスペースの初期化・診断・全件走査
 - 開いている外部ワークスペースを VS Code で起動
-- App内のPowerShell PTYでCodex TUIを起動（PaperpileごとのApp管理作業領域、`workspace-write`）
+- App内のPowerShell PTYでCodex TUIを非同期起動（PaperpileごとのApp管理作業領域、`workspace-write`）
 - Viewerで選択中の文献をCodexの作業コンテキストへ設定
 - CodexがMCPで提示した一時文献リストをViewerへ即時表示
 - MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
@@ -84,8 +86,8 @@ Windows 用の署名なし NSIS インストーラーをビルドし、Private G
 添付します。同時にTauri Updater用の`latest.json`と署名を生成します。
 
 ```powershell
-git tag v0.2.1
-git push origin v0.2.1
+git tag vX.Y.Z
+git push origin vX.Y.Z
 ```
 
 タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。

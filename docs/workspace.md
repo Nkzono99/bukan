@@ -8,7 +8,9 @@ my-research/
 ├── bukan.toml             # ワークスペース設定
 ├── taxonomy.toml          # Paperpileフォルダ・ラベルの分類体系
 ├── AGENTS.md              # 文献調査時のルール
-├── data/                  # Paperpile BibTeXなどの読み取り用索引
+├── data/
+│   ├── paperpile.bib      # Paperpile BibTeXなどの読み取り用索引
+│   └── collections.json   # Workspace独自のコレクションと文献割り当て
 ├── notes/                 # 文献ノート
 ├── queries/               # 再現可能な検索条件
 ├── candidates/            # Paperpileへ未登録の候補
@@ -24,13 +26,20 @@ my-research/
 - 絶対パスを指定すれば、ワークスペース単位で異なる同期先を使用できます。
 - Paperpile の同期フォルダは常に読み取り専用です。
 - PDFを移動・改名せず、タグ提案・ノート・分析結果だけをワークスペースへ保存します。
+- ViewerではPaperpile由来の階層を`Paperpile / All`、独自分類を`Workspace / All`として
+  分けて表示します。
+- `data/collections.json`がまだない初回だけ、Paperpileのコレクション階層と割り当てを
+  Workspaceへ複製します。以後のPaperpile再索引ではこのファイルを上書きしません。
+- Workspaceコレクションの作成・割り当て変更は`data/collections.json`だけを更新し、
+  Paperpile側のコレクションやPDFには書き込みません。
 
 ## Codexターミナル
 
 Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしたPowerShell
-PTYを埋め込み、その中でCodex CLIを起動します。PowerShell 7を優先し、見つからない
+PTYを埋め込み、その中でCodex CLIをバックグラウンド起動します。PowerShell 7を優先し、見つからない
 場合はWindows PowerShellを使用します。表示されるのはCodexの生のTUIであり、
-Bukan独自のチャットUIへ変換しません。Codex終了後はPowerShellプロンプトへ戻ります。
+Bukan独自のチャットUIへ変換しません。起動中もライブラリとPDFを操作でき、
+Codex終了後はPowerShellプロンプトへ戻ります。
 
 起動時は `workspace-write` サンドボックスと `on-request` 承認を明示します。
 Paperpile同期フォルダを追加の書き込み可能ディレクトリには設定しません。
