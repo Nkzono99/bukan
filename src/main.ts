@@ -96,6 +96,7 @@ interface UpdateAuthStatus {
   configured: boolean;
   source: string | null;
   credentialStorageAvailable: boolean;
+  detail?: string | null;
 }
 
 interface AppUpdateCheckResult {
@@ -115,23 +116,45 @@ interface AppUpdateProgress {
   };
 }
 
-interface OrganizationAssignment {
+interface ReviewCitation {
   paperId: string;
   title: string;
-  currentCollections: string[];
-  suggestedFolders: string[];
-  suggestedLabels: string[];
-  evidence: string[];
-  reviewRequired: boolean;
+  authors: string;
+  year: number | null;
+  locator: string;
+  note: string;
 }
 
-interface OrganizationPlan {
-  taxonomyVersion: number;
-  folderRoot: string;
-  paperCount: number;
-  classifiedCount: number;
-  reviewRequiredCount: number;
-  assignments: OrganizationAssignment[];
+interface ReviewFigure {
+  file: string;
+  caption: string;
+  sourcePaperId: string;
+  page: number | null;
+  addedAt: number;
+}
+
+interface ReviewSummary {
+  id: string;
+  theme: string;
+  title: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+  citationCount: number;
+  figureCount: number;
+}
+
+interface ReviewDocument {
+  id: string;
+  theme: string;
+  title: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+  citations: ReviewCitation[];
+  figures: ReviewFigure[];
+  article: string;
+  directory: string;
 }
 
 interface CollectionNode {
@@ -142,8 +165,18 @@ interface CollectionNode {
 }
 
 type SortMode = "recent" | "title" | "year";
-type MainMode = "library" | "organize";
+type MainMode = "library" | "reviews";
 type ThemeMode = "system" | "light" | "dark";
+
+const SIDEBAR_WIDTH = { min: 180, max: 420, initial: 228 };
+const PAPER_LIST_WIDTH = { min: 260, max: 720, initial: 380 };
+
+function storedWidth(key: string, bounds: { min: number; max: number; initial: number }): number {
+  const stored = localStorage.getItem(key);
+  if (stored === null) return bounds.initial;
+  const value = Number(stored);
+  return Number.isFinite(value) ? Math.min(bounds.max, Math.max(bounds.min, value)) : bounds.initial;
+}
 
 const app = document.querySelector<HTMLDivElement>("#app") as HTMLDivElement;
 if (!app) throw new Error("App mount point was not found");
@@ -157,6 +190,7 @@ const state: {
   library: LibraryIndex | null;
   workspaceRoot: string | null;
   workspaceName: string | null;
+  managedWorkspace: boolean;
   query: string;
   collection: string | null;
   starredOnly: boolean;
@@ -165,12 +199,17 @@ const state: {
   selectedId: string | null;
   visibleLimit: number;
   error: string | null;
-  organizationPlan: OrganizationPlan | null;
-  organizationLoading: boolean;
   collapsedCollections: Set<string>;
   theme: ThemeMode;
   sidebarCollapsed: boolean;
+  sidebarWidth: number;
   listCollapsed: boolean;
+  paperListWidth: number;
+  reviewSummaries: ReviewSummary[];
+  activeReview: ReviewDocument | null;
+  reviewLoading: boolean;
+  reviewSaving: boolean;
+  reviewEditing: boolean;
   commandOpen: boolean;
   codexOpen: boolean;
   codexStarting: boolean;
@@ -199,6 +238,7 @@ const state: {
   library: null,
   workspaceRoot: null,
   workspaceName: null,
+  managedWorkspace: false,
   query: "",
   collection: null,
   starredOnly: false,
@@ -207,12 +247,17 @@ const state: {
   selectedId: null,
   visibleLimit: 120,
   error: null,
-  organizationPlan: null,
-  organizationLoading: false,
   collapsedCollections: new Set<string>(),
   theme: (localStorage.getItem("bukan.theme") as ThemeMode | null) ?? "system",
   sidebarCollapsed: false,
+  sidebarWidth: storedWidth("bukan.sidebarWidth", SIDEBAR_WIDTH),
   listCollapsed: false,
+  paperListWidth: storedWidth("bukan.paperListWidth", PAPER_LIST_WIDTH),
+  reviewSummaries: [],
+  activeReview: null,
+  reviewLoading: false,
+  reviewSaving: false,
+  reviewEditing: false,
   commandOpen: false,
   codexOpen: false,
   codexStarting: false,
@@ -224,7 +269,7 @@ const state: {
   codexPaperListSelection: 0,
   libraryChangeToken: null,
   libraryLastCheckedAt: null,
-  appVersion: "0.1.0",
+  appVersion: "0.2.0",
   updateAuth: null,
   updateResult: null,
   updateDialogOpen: false,
@@ -253,6 +298,7 @@ const icons = {
   settings: `<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06-2.83 2.83-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6 1.7 1.7 0 0 0-.4 1.1V21h-4v-.1A1.7 1.7 0 0 0 8.6 19.4a1.7 1.7 0 0 0-1.88.34l-.06.06-2.83-2.83.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1 1.7 1.7 0 0 0-1.1-.4H3v-4h.1A1.7 1.7 0 0 0 4.6 8.6a1.7 1.7 0 0 0-.34-1.88l-.06-.06 2.83-2.83.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6 1.7 1.7 0 0 0 .4-1.1V3h4v.1A1.7 1.7 0 0 0 15.4 4.6a1.7 1.7 0 0 0 1.88-.34l.06-.06 2.83 2.83-.06.06A1.7 1.7 0 0 0 19.4 9c.36.28.58.68.6 1.1v.1h1v4h-.1a1.7 1.7 0 0 0-1.5.8Z"/></svg>`,
   code: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m17 4-9.5 8L17 20l3-1.5v-13L17 4Z"/><path d="m7.5 12-4-3v6l4-3Z"/></svg>`,
   terminal: `<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 16h5"/></svg>`,
+  review: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h11l3 3v15H5z"/><path d="M16 3v4h4M8 11h8M8 15h8M8 19h5"/></svg>`,
   close: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>`,
   context: `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 4h14v16H5zM8 8h8M8 12h8M8 16h5"/><path d="m17 14 4 2-4 2v-4Z"/></svg>`,
 };
@@ -397,7 +443,7 @@ function collectionTreeItemTemplate(node: CollectionNode, depth = 0): string {
   const hasChildren = children.length > 0;
   const collapsed = state.collapsedCollections.has(node.path);
   return `<div class="collection-node ${collapsed ? "collapsed" : ""}">
-    <div class="collection-node-row ${state.collection === node.path ? "active" : ""}" style="--tree-depth:${depth}">
+    <div class="collection-node-row ${state.collection === node.path ? "active" : ""}" style="--tree-indent:${depth * 12}px">
       ${hasChildren
         ? `<button class="collection-toggle" data-collection-toggle="${escapeHtml(node.path)}" aria-label="${collapsed ? "展開" : "折りたたむ"}" aria-expanded="${!collapsed}">${icons.chevron}</button>`
         : `<span class="collection-toggle-spacer"></span>`}
@@ -503,8 +549,8 @@ function sidebarTemplate(): string {
       <button class="nav-item ${state.starredOnly ? "active" : ""}" data-view="starred">
         <span>${icons.star}スター付き</span><em>${library.stats.starredCount}</em>
       </button>
-      <button class="nav-item organize-nav ${state.mode === "organize" ? "active" : ""}" data-view="organize" title="${state.workspaceRoot ? "Bukan分類候補を確認" : "ワークスペースを開くと利用できます"}">
-        <span>${icons.folder}Bukan 整理</span><em>${state.workspaceRoot ? "→" : "—"}</em>
+      <button class="nav-item ${state.mode === "reviews" ? "active" : ""}" data-view="reviews">
+        <span>${icons.review}継続レビュー</span><em>${state.reviewSummaries.length}</em>
       </button>
       ${state.codexPaperList ? `<button class="nav-item codex-list-nav ${state.codexPaperListVisible ? "active" : ""}" data-view="codex-list">
         <span>${icons.terminal}Codex リスト</span><em>${state.codexPaperList.papers.length}</em>
@@ -515,12 +561,13 @@ function sidebarTemplate(): string {
       </div>
     </nav>
     <div class="sidebar-footer">
-      <div class="drive-status"><span>${state.workspaceRoot ? icons.folder : icons.drive}</span><div><strong>${escapeHtml(state.workspaceName ?? "Google Drive")}</strong><small>${escapeHtml(state.workspaceRoot ?? library.root)}</small></div><i></i></div>
+      <div class="drive-status"><span>${state.workspaceRoot && !state.managedWorkspace ? icons.folder : icons.drive}</span><div><strong>${escapeHtml(state.workspaceName ?? "Google Drive")}</strong><small>${escapeHtml(state.managedWorkspace ? library.root : state.workspaceRoot ?? library.root)}</small></div><i></i></div>
       <div class="workspace-footer-actions">
-        ${state.workspaceRoot ? `<button class="open-vscode" type="button">${icons.code}<span>VS Codeで開く</span></button>` : ""}
+        ${state.workspaceRoot && !state.managedWorkspace ? `<button class="open-vscode" type="button">${icons.code}<span>VS Codeで開く</span></button>` : ""}
         <button class="change-library" type="button">ライブラリを変更</button>
       </div>
     </div>
+    <div class="resize-handle sidebar-resize-handle" data-resize-pane="sidebar" role="separator" aria-orientation="vertical" aria-label="サイドバーの幅を変更" tabindex="0"></div>
   </aside>`;
 }
 
@@ -532,7 +579,7 @@ function railTemplate(): string {
     <nav class="rail-nav">
       <button class="rail-button ${state.mode === "library" && !state.starredOnly ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
       <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
-      <button class="rail-button ${state.mode === "organize" ? "active" : ""}" type="button" data-rail-action="organize" title="Bukan 整理" aria-label="Bukan 整理">${icons.folder}</button>
+      <button class="rail-button ${state.mode === "reviews" ? "active" : ""}" type="button" data-rail-action="reviews" title="継続レビュー" aria-label="継続レビュー">${icons.review}</button>
       <button class="rail-button ${state.codexOpen ? "active" : ""}" type="button" data-rail-action="codex" title="Codex（Ctrl+J）" aria-label="Codexを開閉">${icons.terminal}</button>
     </nav>
     <div class="rail-bottom">
@@ -548,9 +595,9 @@ function commandPaletteTemplate(): string {
     ["search", icons.search, "論文を検索", "現在のライブラリ"],
     ["all", icons.library, "すべての文献", "ライブラリ"],
     ["starred", icons.star, "スター付き文献", "ライブラリ"],
-    ["organize", icons.folder, "Bukan 整理を開く", "ワークスペース"],
-    ...(state.workspaceRoot ? [["toggle-codex", icons.terminal, state.codexOpen ? "Codexを閉じる" : "Codexを開く", "ワークスペース"]] : []),
-    ...(state.workspaceRoot ? [["open-vscode", icons.code, "VS Codeでワークスペースを開く", "ワークスペース"]] : []),
+    ["reviews", icons.review, "継続レビューを開く", `${state.reviewSummaries.length} themes`],
+    ...(state.workspaceRoot ? [["toggle-codex", icons.terminal, state.codexOpen ? "Codexを閉じる" : "Codexを開く", "現在のライブラリ"]] : []),
+    ...(state.workspaceRoot && !state.managedWorkspace ? [["open-vscode", icons.code, "VS Codeでワークスペースを開く", "ワークスペース"]] : []),
     ["toggle-sidebar", icons.panel, state.sidebarCollapsed ? "コレクションを表示" : "コレクションを格納", "表示"],
     ["toggle-list", icons.list, state.listCollapsed ? "論文一覧を表示" : "論文一覧を格納", "表示"],
     ["theme-system", icons.settings, "テーマ: System", "表示"],
@@ -591,6 +638,7 @@ function paperListTemplate(papers: PaperRecord[]): string {
       ${visible.length ? visible.map(paperRowTemplate).join("") : `<div class="empty-results"><span>${icons.search}</span><h3>該当する文献がありません</h3><p>検索語やコレクションを変えてみてください。</p></div>`}
       ${papers.length > visible.length ? `<button class="load-more" type="button">さらに表示 <span>${visible.length} / ${papers.length}</span></button>` : ""}
     </div>
+    <div class="resize-handle paper-list-resize-handle" data-resize-pane="paper-list" role="separator" aria-orientation="vertical" aria-label="文献リストの幅を変更" tabindex="0"></div>
   </section>`;
 }
 
@@ -721,15 +769,14 @@ function codexPaneTemplate(): string {
   if (!state.workspaceRoot) {
     body = `<div class="codex-empty">
       <span>${icons.terminal}</span>
-      <h3>Workspaceが必要です</h3>
-      <p>CodexはPaperpileではなく、Bukan Workspaceを作業ディレクトリとして起動します。</p>
-      <button class="secondary-button create-workspace" type="button">Workspaceを初期化</button>
+      <h3>Codexの作業領域を準備できません</h3>
+      <p>ライブラリを開き直すと、Appが作業領域を自動的に準備します。</p>
     </div>`;
   } else if (state.codexStarting || !status) {
     body = `<div class="codex-empty">
       <span class="reading-spinner"><i></i><i></i><i></i></span>
       <h3>${state.codexStarting ? "Codexを起動しています" : "Codexを確認しています"}</h3>
-      <p>WorkspaceとローカルのCodex CLIを準備しています。</p>
+      <p>ライブラリ用の作業領域とローカルのCodex CLIを準備しています。</p>
     </div>`;
   } else if (!status.available) {
     body = `<div class="codex-empty">
@@ -743,7 +790,7 @@ function codexPaneTemplate(): string {
     body = `<div class="codex-empty">
       <span>${icons.terminal}</span>
       <h3>Codexセッションは終了しました</h3>
-      <p>${state.codexError ? escapeHtml(state.codexError) : "同じWorkspaceで新しいセッションを開始できます。"}</p>
+      <p>${state.codexError ? escapeHtml(state.codexError) : "同じライブラリで新しいセッションを開始できます。"}</p>
       <button class="action-button start-codex" type="button">${icons.terminal}Codexを起動</button>
     </div>`;
   } else {
@@ -772,72 +819,96 @@ function codexPaneTemplate(): string {
   </aside>`;
 }
 
-function organizationTemplate(): string {
-  if (state.organizationLoading) {
-    return `<section class="organization-view organization-loading">
-      <span class="reading-spinner"><i></i><i></i><i></i></span>
-      <h2>分類候補を生成しています</h2>
-      <p>527件のタイトルと既存コレクションを taxonomy.toml のルールと照合しています。</p>
-    </section>`;
-  }
-  const plan = state.organizationPlan;
-  if (!plan) {
-    return `<section class="organization-view organization-loading"><h2>分類計画を読み込めませんでした</h2><p>ワークスペース設定を確認してください。</p></section>`;
-  }
+function reviewInlineTemplate(value: string): string {
+  return escapeHtml(value)
+    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/(\[@[A-Za-z0-9_-]+(?:,[^\]]+)?\])/g, '<span class="review-citation-marker">$1</span>');
+}
 
-  const folderCounts = new Map<string, number>();
-  plan.assignments.forEach((assignment) => assignment.suggestedFolders.forEach((folder) => {
-    folderCounts.set(folder, (folderCounts.get(folder) ?? 0) + 1);
-  }));
-  const folders = [...folderCounts.entries()].sort((left, right) => right[1] - left[1]);
-  const coverage = plan.paperCount ? Math.round(plan.classifiedCount / plan.paperCount * 100) : 0;
+function reviewArticleTemplate(review: ReviewDocument): string {
+  const lines = review.article.split(/\r?\n/);
+  return lines.map((line) => {
+    const image = line.match(/^!\[(.*)\]\(figures\/([^)]+)\)$/);
+    if (image) {
+      const figure = review.figures.find((candidate) => candidate.file === image[2]);
+      if (figure) {
+        const imagePath = `${review.directory}\\figures\\${figure.file}`;
+        return `<figure><img src="${escapeHtml(convertFileSrc(imagePath))}" alt="${escapeHtml(image[1] ?? figure.caption)}" /><figcaption>${escapeHtml(figure.caption)}${figure.page ? ` · p. ${figure.page}` : ""}</figcaption></figure>`;
+      }
+    }
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1]?.length ?? 1;
+      return `<h${level}>${reviewInlineTemplate(heading[2] ?? "")}</h${level}>`;
+    }
+    if (line.startsWith("> ")) return `<blockquote>${reviewInlineTemplate(line.slice(2))}</blockquote>`;
+    if (line.startsWith("- ")) return `<p class="review-bullet"><span>•</span>${reviewInlineTemplate(line.slice(2))}</p>`;
+    if (!line.trim()) return `<div class="review-paragraph-break"></div>`;
+    return `<p>${reviewInlineTemplate(line)}</p>`;
+  }).join("");
+}
 
-  return `<section class="organization-view">
-    <header class="organization-header">
-      <div><p class="section-kicker">BUKAN ORGANIZER</p><h1>文献の整理計画</h1><p>Paperpileへ適用する前の、根拠付きフォルダ・ラベル候補です。</p></div>
-      <span class="taxonomy-version">taxonomy v${plan.taxonomyVersion}</span>
-    </header>
-    <div class="organization-stats">
-      <article><small>全文献</small><strong>${plan.paperCount}</strong><span>papers</span></article>
-      <article><small>候補あり</small><strong>${plan.classifiedCount}</strong><span>${coverage}% coverage</span></article>
-      <article class="review-stat"><small>手動確認</small><strong>${plan.reviewRequiredCount}</strong><span>自動分類なし</span></article>
-      <article><small>提案フォルダ</small><strong>${folders.length}</strong><span>${escapeHtml(plan.folderRoot)}/ 以下</span></article>
-    </div>
-    <div class="organization-columns">
-      <section class="taxonomy-panel">
-        <div class="organization-section-title"><div><p class="section-kicker">FOLDER MAP</p><h2>${escapeHtml(plan.folderRoot)}/</h2></div><span>${folders.length} folders</span></div>
-        <div class="folder-map">
-          ${folders.map(([folder, count]) => {
-            const relative = folder.startsWith(`${plan.folderRoot}/`) ? folder.slice(plan.folderRoot.length + 1) : folder;
-            const [axis, ...rest] = relative.split("/");
-            return `<div class="folder-map-row"><span>${icons.folder}</span><p><small>${escapeHtml(axis ?? "")}</small><strong>${escapeHtml(rest.join(" / ") || axis || folder)}</strong></p><em>${count}</em></div>`;
-          }).join("")}
-        </div>
-      </section>
-      <section class="assignment-panel">
-        <div class="organization-section-title"><div><p class="section-kicker">REVIEW QUEUE</p><h2>分類候補</h2></div><span>上位 ${Math.min(plan.assignments.length, 120)} 件</span></div>
-        <div class="assignment-list">
-          ${plan.assignments.slice(0, 120).map((assignment) => `
-            <article class="assignment-row ${assignment.reviewRequired ? "needs-review" : ""}">
-              <div class="assignment-title"><span>${assignment.reviewRequired ? "要確認" : "候補"}</span><h3>${escapeHtml(assignment.title)}</h3><small>${escapeHtml(assignment.currentCollections.map(displayCollectionPath).filter(Boolean).join(" · ") || "未分類")}</small></div>
-              <div class="suggestion-chips">
-                ${assignment.suggestedFolders.map((folder) => `<i class="folder-chip">${escapeHtml(folder)}</i>`).join("")}
-                ${assignment.suggestedLabels.map((label) => `<i>${escapeHtml(label)}</i>`).join("")}
+function reviewsTemplate(): string {
+  const review = state.activeReview;
+  return `<section class="reviews-view">
+    <aside class="reviews-index">
+      <header><p class="section-kicker">LIVING REVIEWS</p><h1>継続レビュー</h1><small>テーマ別に引用と図を蓄積</small></header>
+      <div class="review-codex-guide">
+        <p>テーマ作成、文献の引用、図の添付はCodexから行います。</p>
+        <button class="action-button open-review-codex" type="button">${icons.terminal}Codexを開く</button>
+      </div>
+      <div class="reviews-list">
+        ${state.reviewSummaries.length
+          ? state.reviewSummaries.map((item) => `<button class="review-list-item ${review?.id === item.id ? "active" : ""}" type="button" data-review-id="${escapeHtml(item.id)}">
+              <strong>${escapeHtml(item.title)}</strong>
+              <span>rev.${item.revision} · 引用 ${item.citationCount} · 図 ${item.figureCount}</span>
+              <small>${new Intl.DateTimeFormat("ja-JP", { dateStyle: "medium" }).format(new Date(item.updatedAt * 1000))}</small>
+            </button>`).join("")
+          : `<div class="reviews-empty-list"><span>${icons.review}</span><p>Codexへテーマを伝えると、MCP経由でレビューがここへ作成されます。</p></div>`}
+      </div>
+    </aside>
+    <article class="review-document">
+      ${state.reviewLoading
+        ? `<div class="review-document-empty"><span class="reading-spinner"><i></i><i></i><i></i></span><p>レビューを読み込んでいます</p></div>`
+        : !review
+          ? `<div class="review-document-empty">${icons.review}<h2>テーマを選択してください</h2><p>本文はMarkdown、引用は論文IDとページ位置、画像は出典付きの図として保存されます。</p></div>`
+          : `<header class="review-document-header">
+              <div><p class="section-kicker">REVISION ${review.revision}</p><h2>${escapeHtml(review.title)}</h2><small>${escapeHtml(review.theme)}</small></div>
+              <div>
+                <button class="secondary-update-action review-with-codex" type="button">${icons.terminal}Codexで更新</button>
+                ${state.reviewEditing
+                  ? `<button class="secondary-update-action cancel-review-edit" type="button">キャンセル</button><button class="action-button save-review" type="button" ${state.reviewSaving ? "disabled" : ""}>${state.reviewSaving ? "保存中" : "改訂を保存"}</button>`
+                  : `<button class="secondary-update-action edit-review" type="button">本文を編集</button>`}
               </div>
-              <p class="evidence">${escapeHtml(assignment.evidence.join(" · ") || "分類根拠なし — 手動で確認")}</p>
-            </article>`).join("")}
-        </div>
-      </section>
-    </div>
+            </header>
+            <div class="review-document-body">
+              ${state.reviewEditing
+                ? `<textarea id="review-article-editor" spellcheck="true">${escapeHtml(review.article)}</textarea>`
+                : `<div class="review-article">${reviewArticleTemplate(review)}</div>`}
+              <aside class="review-evidence">
+                <section><h3>引用文献 <span>${review.citations.length}</span></h3>
+                  ${review.citations.length
+                    ? review.citations.map((citation) => `<article><strong>${escapeHtml(citation.title)}</strong><p>${escapeHtml([citation.authors, citation.year?.toString()].filter(Boolean).join(" · "))}</p><small>${escapeHtml(citation.locator || "位置未記録")}${citation.note ? ` · ${escapeHtml(citation.note)}` : ""}</small></article>`).join("")
+                    : `<p>Codexから本文を更新するときに、論文IDとPDFページを構造化して記録できます。</p>`}
+                </section>
+                <section><h3>図 <span>${review.figures.length}</span></h3>
+                  ${review.figures.length
+                    ? review.figures.map((figure) => `<figure><img src="${escapeHtml(convertFileSrc(`${review.directory}\\figures\\${figure.file}`))}" alt="${escapeHtml(figure.caption)}" /><figcaption>${escapeHtml(figure.caption)}${figure.page ? ` · p. ${figure.page}` : ""}</figcaption></figure>`).join("")
+                    : `<p>CodexがWorkspace内へ抽出した画像を、出典論文・ページ付きで添付できます。</p>`}
+                </section>
+              </aside>
+            </div>`}
+    </article>
   </section>`;
 }
 
 function workspaceTemplate(): string {
   const papers = filteredPapers();
-  const currentTitle = state.mode === "organize"
-    ? "Bukan 整理"
+  const currentTitle = state.mode === "reviews"
+    ? state.activeReview?.title ?? "継続レビュー"
     : state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers");
-  return `<div class="workspace ${state.sidebarCollapsed ? "sidebar-collapsed" : ""}">
+  return `<div class="workspace ${state.sidebarCollapsed ? "sidebar-collapsed" : ""}" style="--sidebar-width:${state.sidebarWidth}px;--paper-list-width:${state.paperListWidth}px">
     ${railTemplate()}
     ${sidebarTemplate()}
     <main class="workspace-main">
@@ -857,8 +928,8 @@ function workspaceTemplate(): string {
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
         </div>
       </header>
-      ${state.mode === "organize"
-        ? organizationTemplate()
+      ${state.mode === "reviews"
+        ? reviewsTemplate()
         : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""} ${state.codexOpen ? "codex-open" : ""}">${paperListTemplate(papers)}${state.codexPaperListVisible ? codexPaperListTemplate() : viewerTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`}
     </main>
     ${commandPaletteTemplate()}
@@ -938,6 +1009,7 @@ function render(): void {
 }
 
 function bindEvents(): void {
+  bindResizeHandles();
   document.querySelectorAll<HTMLElement>(".update-trigger").forEach((element) => {
     element.addEventListener("click", () => void checkForAppUpdate(false));
   });
@@ -962,8 +1034,8 @@ function bindEvents(): void {
         render();
       } else if (action === "search") {
         focusLibrarySearch();
-      } else if (action === "organize") {
-        void openOrganization();
+      } else if (action === "reviews") {
+        void openReviews();
       } else if (action === "codex") {
         void toggleCodex();
       } else if (action === "command") {
@@ -1059,8 +1131,12 @@ function bindEvents(): void {
     element.addEventListener("click", () => {
       state.workspaceRoot = null;
       state.workspaceName = null;
+      state.managedWorkspace = false;
       state.codexPaperList = null;
       state.codexPaperListVisible = false;
+      state.reviewSummaries = [];
+      state.activeReview = null;
+      state.reviewEditing = false;
       void loadLibrary(element.dataset.libraryPath ?? "");
     });
   });
@@ -1083,7 +1159,22 @@ function bindEvents(): void {
     state.visibleLimit = 120;
     render();
   });
-  document.querySelector<HTMLElement>("[data-view='organize']")?.addEventListener("click", () => void openOrganization());
+  document.querySelector<HTMLElement>("[data-view='reviews']")?.addEventListener("click", () => void openReviews());
+  document.querySelector<HTMLElement>(".open-review-codex")?.addEventListener("click", () => void updateReviewWithCodex());
+  document.querySelectorAll<HTMLElement>("[data-review-id]").forEach((element) => {
+    element.addEventListener("click", () => void loadReview(element.dataset.reviewId ?? ""));
+  });
+  document.querySelector<HTMLElement>(".edit-review")?.addEventListener("click", () => {
+    state.reviewEditing = true;
+    render();
+    window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("#review-article-editor")?.focus(), 0);
+  });
+  document.querySelector<HTMLElement>(".cancel-review-edit")?.addEventListener("click", () => {
+    state.reviewEditing = false;
+    render();
+  });
+  document.querySelector<HTMLElement>(".save-review")?.addEventListener("click", () => void saveReview());
+  document.querySelector<HTMLElement>(".review-with-codex")?.addEventListener("click", () => void updateReviewWithCodex());
   document.querySelectorAll<HTMLElement>("[data-collection]").forEach((element) => {
     element.addEventListener("click", () => {
       state.collection = element.dataset.collection ?? null;
@@ -1148,6 +1239,55 @@ function bindEvents(): void {
   }
 }
 
+function bindResizeHandles(): void {
+  document.querySelectorAll<HTMLElement>("[data-resize-pane]").forEach((handle) => {
+    const pane = handle.dataset.resizePane;
+    const bounds = pane === "sidebar" ? SIDEBAR_WIDTH : PAPER_LIST_WIDTH;
+    const storageKey = pane === "sidebar" ? "bukan.sidebarWidth" : "bukan.paperListWidth";
+    const updateWidth = (width: number) => {
+      const next = Math.round(Math.min(bounds.max, Math.max(bounds.min, width)));
+      if (pane === "sidebar") state.sidebarWidth = next;
+      else state.paperListWidth = next;
+      document.querySelector<HTMLElement>(".workspace")?.style.setProperty(
+        pane === "sidebar" ? "--sidebar-width" : "--paper-list-width",
+        `${next}px`,
+      );
+      localStorage.setItem(storageKey, String(next));
+    };
+
+    handle.addEventListener("pointerdown", (event) => {
+      if (event.button !== 0) return;
+      event.preventDefault();
+      const startX = event.clientX;
+      const startWidth = pane === "sidebar" ? state.sidebarWidth : state.paperListWidth;
+      handle.setPointerCapture(event.pointerId);
+      document.body.classList.add("resizing-columns");
+      const move = (moveEvent: PointerEvent) => updateWidth(startWidth + moveEvent.clientX - startX);
+      const finish = () => {
+        handle.removeEventListener("pointermove", move);
+        document.body.classList.remove("resizing-columns");
+        scheduleCodexResize();
+      };
+      handle.addEventListener("pointermove", move);
+      handle.addEventListener("pointerup", finish, { once: true });
+      handle.addEventListener("pointercancel", finish, { once: true });
+    });
+
+    handle.addEventListener("keydown", (event) => {
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      event.preventDefault();
+      const current = pane === "sidebar" ? state.sidebarWidth : state.paperListWidth;
+      updateWidth(current + (event.key === "ArrowRight" ? 12 : -12));
+      render();
+    });
+
+    handle.addEventListener("dblclick", () => {
+      updateWidth(bounds.initial);
+      render();
+    });
+  });
+}
+
 function openCommandPalette(): void {
   state.commandOpen = true;
   render();
@@ -1176,10 +1316,10 @@ function executeCommand(action: string): void {
     state.collection = null;
     state.starredOnly = action === "starred";
     render();
-  } else if (action === "organize") {
-    void openOrganization();
   } else if (action === "open-vscode") {
     void openWorkspaceInVsCode();
+  } else if (action === "reviews") {
+    void openReviews();
   } else if (action === "toggle-codex") {
     void toggleCodex();
   } else if (action === "toggle-sidebar") {
@@ -1342,7 +1482,7 @@ async function checkForAppUpdate(quiet: boolean): Promise<void> {
     state.updateAuth = await invoke<UpdateAuthStatus>("update_auth_status");
     if (!state.updateAuth.configured) {
       if (!quiet) {
-        state.updateError = "private Releaseへ接続するGitHub認証を設定してください。";
+        state.updateError = state.updateAuth.detail ?? "private Releaseへ接続するGitHub認証を設定してください。";
         render();
       }
       return;
@@ -1413,6 +1553,106 @@ async function installAppUpdate(): Promise<void> {
     state.updateInstalling = false;
     state.updateError = String(error);
     render();
+  }
+}
+
+async function openReviews(): Promise<void> {
+  if (!state.workspaceRoot) {
+    showToast("レビューの作業領域を準備できませんでした。ライブラリを開き直してください。", true);
+    return;
+  }
+  state.mode = "reviews";
+  state.reviewEditing = false;
+  render();
+  await refreshReviews(true);
+}
+
+async function refreshReviews(selectFirst = false): Promise<void> {
+  if (!state.workspaceRoot || !("__TAURI_INTERNALS__" in window)) return;
+  try {
+    const summaries = await invoke<ReviewSummary[]>("list_research_reviews", {
+      workspaceRoot: state.workspaceRoot,
+    });
+    const activeSummary = summaries.find((review) => review.id === state.activeReview?.id);
+    const activeChanged = activeSummary && activeSummary.updatedAt !== state.activeReview?.updatedAt;
+    state.reviewSummaries = summaries;
+    if (activeChanged) {
+      await loadReview(activeSummary.id, false);
+      return;
+    }
+    if (selectFirst && !state.activeReview && summaries[0]) {
+      await loadReview(summaries[0].id, false);
+      return;
+    }
+    if (state.mode === "reviews") render();
+  } catch (error) {
+    console.warn("Could not refresh research reviews", error);
+  }
+}
+
+async function loadReview(reviewId: string, showLoading = true): Promise<void> {
+  if (!state.workspaceRoot || !reviewId) return;
+  state.mode = "reviews";
+  state.reviewEditing = false;
+  if (showLoading) {
+    state.reviewLoading = true;
+    render();
+  }
+  try {
+    state.activeReview = await invoke<ReviewDocument>("get_research_review", {
+      workspaceRoot: state.workspaceRoot,
+      reviewId,
+    });
+    await invoke("set_current_research_review", {
+      workspaceRoot: state.workspaceRoot,
+      reviewId,
+    });
+  } catch (error) {
+    showToast(String(error), true);
+  } finally {
+    state.reviewLoading = false;
+    render();
+  }
+}
+
+async function saveReview(): Promise<void> {
+  if (!state.workspaceRoot || !state.activeReview || state.reviewSaving) return;
+  const article = document.querySelector<HTMLTextAreaElement>("#review-article-editor")?.value;
+  if (article === undefined) return;
+  state.reviewSaving = true;
+  render();
+  try {
+    state.activeReview = await invoke<ReviewDocument>("save_research_review", {
+      workspaceRoot: state.workspaceRoot,
+      reviewId: state.activeReview.id,
+      article,
+    });
+    state.reviewEditing = false;
+    await refreshReviews();
+    showToast(`改訂 ${state.activeReview.revision} を保存しました`);
+  } catch (error) {
+    showToast(String(error), true);
+  } finally {
+    state.reviewSaving = false;
+    render();
+  }
+}
+
+async function updateReviewWithCodex(): Promise<void> {
+  if (!state.workspaceRoot) return;
+  try {
+    if (state.activeReview) {
+      await invoke("set_current_research_review", {
+        workspaceRoot: state.workspaceRoot,
+        reviewId: state.activeReview.id,
+      });
+      showToast(`Codexへ「${state.activeReview.title}」を現在のレビューとして設定しました`);
+    } else {
+      showToast("Codexへテーマを伝えると、MCP経由で継続レビューを作成できます");
+    }
+    await toggleCodex(true);
+  } catch (error) {
+    showToast(String(error), true);
   }
 }
 
@@ -1611,28 +1851,6 @@ async function runPaperAction(command: "open_paper" | "reveal_paper"): Promise<v
   }
 }
 
-async function openOrganization(): Promise<void> {
-  if (!state.workspaceRoot) {
-    showToast("Bukan整理を使うには、先にワークスペースを開いてください", true);
-    return;
-  }
-  state.mode = "organize";
-  if (state.organizationPlan) {
-    render();
-    return;
-  }
-  state.organizationLoading = true;
-  render();
-  try {
-    state.organizationPlan = await invoke<OrganizationPlan>("suggest_organization", { workspaceRoot: state.workspaceRoot });
-  } catch (error) {
-    showToast(String(error), true);
-  } finally {
-    state.organizationLoading = false;
-    render();
-  }
-}
-
 async function chooseLibrary(): Promise<void> {
   try {
     const selected = await open({ directory: true, multiple: false, title: "Paperpile フォルダを選択" });
@@ -1640,11 +1858,15 @@ async function chooseLibrary(): Promise<void> {
       if (state.codexStatus?.running) await invoke("stop_codex_terminal");
       state.workspaceRoot = null;
       state.workspaceName = null;
+      state.managedWorkspace = false;
       state.codexOpen = false;
       state.codexStatus = null;
       state.codexContextPaperId = null;
       state.codexPaperList = null;
       state.codexPaperListVisible = false;
+      state.reviewSummaries = [];
+      state.activeReview = null;
+      state.reviewEditing = false;
       state.libraryChangeToken = null;
       state.libraryLastCheckedAt = null;
       localStorage.removeItem("bukan.workspaceRoot");
@@ -1687,11 +1909,14 @@ async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void>
   }
   state.workspaceRoot = descriptor.root;
   state.workspaceName = descriptor.name;
-  state.organizationPlan = null;
+  state.managedWorkspace = false;
   state.codexStatus = null;
   state.codexContextPaperId = null;
   state.codexPaperList = null;
   state.codexPaperListVisible = false;
+  state.reviewSummaries = [];
+  state.activeReview = null;
+  state.reviewEditing = false;
   state.libraryChangeToken = null;
   state.libraryLastCheckedAt = null;
   localStorage.setItem("bukan.workspaceRoot", descriptor.root);
@@ -1712,7 +1937,21 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
   }
   try {
     const index = await invoke<LibraryIndex>("scan_library", { root });
+    if (!state.workspaceRoot) {
+      try {
+        const descriptor = await invoke<WorkspaceDescriptor>("ensure_managed_workspace", {
+          paperpileRoot: index.root,
+        });
+        state.workspaceRoot = descriptor.root;
+        state.workspaceName = null;
+        state.managedWorkspace = true;
+      } catch (error) {
+        console.warn("Could not prepare the managed Codex workspace", error);
+        showToast(`Codexの作業領域を準備できませんでした: ${String(error)}`, true);
+      }
+    }
     state.library = index;
+    await refreshReviews();
     state.selectedId = state.selectedId && index.papers.some((paper) => paper.id === state.selectedId) ? state.selectedId : null;
     localStorage.setItem("bukan.paperpileRoot", index.root);
     if (quiet) {
@@ -1825,12 +2064,83 @@ function demoLibrary(): LibraryIndex {
   };
 }
 
+function demoReview(): ReviewDocument {
+  const now = Math.floor(Date.now() / 1000);
+  return {
+    id: "demo-lunar-dust-review",
+    theme: "月面ダスト輸送に対する静電場の影響",
+    title: "月面ダストの静電輸送：観測・実験・数値モデルの統合レビュー",
+    revision: 4,
+    createdAt: now - 2_592_000,
+    updatedAt: now - 3_600,
+    citations: [
+      {
+        paperId: "demo-1",
+        title: "Electrostatic Dust Transport on the Lunar Surface",
+        authors: "Sato, K. & Miller, J.",
+        year: 2024,
+        locator: "pp. 12–14, Fig. 3",
+        note: "終端速度の推定",
+      },
+      {
+        paperId: "demo-2",
+        title: "Lunar Dust Dynamics: A Comprehensive Review",
+        authors: "García et al.",
+        year: 2023,
+        locator: "§4.2",
+        note: "観測制約の整理",
+      },
+    ],
+    figures: [],
+    article: `# 月面ダストの静電輸送
+
+> Theme: 月面ダスト輸送に対する静電場の影響
+
+## Scope
+
+月面表層で帯電したダストが浮遊・移動する過程について、観測、実験、数値モデルの整合性を継続的に検討する。
+
+## Evidence synthesis
+
+光電子放出による表面電位は局所時刻とプラズマ条件に強く依存し、粒径ごとの浮遊可能性を変化させる [@demo-1, pp. 12–14]。
+
+既存レビューが示す地平線発光の解釈には未確定要素が残り、直接観測と輸送モデルを分けて評価する必要がある [@demo-2, §4.2]。
+
+## Open questions
+
+- 微小スケールの電場構造を全球モデルへどう接続するか
+- 観測されたダストフラックスを一意に説明できる粒径分布
+
+## References
+
+引用情報は右側のエビデンス欄に論文IDと根拠位置付きで保持する。`,
+    directory: "C:\\demo\\workspace\\reports\\reviews\\demo-lunar-dust-review",
+  };
+}
+
 async function initialize(): Promise<void> {
   applyTheme();
   await setupCodexEventListeners();
   await setupUpdateIntegration();
   if (isDemoMode) {
     state.library = demoLibrary();
+    state.workspaceRoot = "C:\\demo\\workspace";
+    state.workspaceName = "Bukan";
+    if (new URLSearchParams(window.location.search).has("reviews")) {
+      const review = demoReview();
+      state.mode = "reviews";
+      state.activeReview = review;
+      state.reviewSummaries = [{
+        id: review.id,
+        theme: review.theme,
+        title: review.title,
+        revision: review.revision,
+        createdAt: review.createdAt,
+        updatedAt: review.updatedAt,
+        citationCount: review.citations.length,
+        figureCount: review.figures.length,
+      }];
+    }
     state.loading = false;
     render();
     return;
@@ -1899,6 +2209,7 @@ window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () 
 });
 
 window.setInterval(() => void refreshCodexPaperList(), 1200);
+window.setInterval(() => void refreshReviews(), 2500);
 window.setInterval(() => void refreshLibraryChangeToken(), 30000);
 
 void initialize();

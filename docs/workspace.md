@@ -12,7 +12,7 @@ my-research/
 ├── notes/                 # 文献ノート
 ├── queries/               # 再現可能な検索条件
 ├── candidates/            # Paperpileへ未登録の候補
-├── reports/               # 検索レポートとエビデンス表
+├── reports/               # 検索レポート、エビデンス表、継続レビュー
 ├── imports/               # Paperpileへ戻すファイル
 ├── .bukan/                # ViewerとCodexの一時コンテキスト（Git対象外）
 └── cache/                 # 再生成可能な索引・抽出テキスト（Git対象外）
@@ -52,6 +52,24 @@ PaperpileおよびGoogle Drive Workspaceには自動で書き込みません。`
 またはGUIの「消去」で削除できます。利用者が保存ボタンを押した場合だけ、
 Markdownレポートを`reports/codex-lists/`、JSON候補を
 `candidates/codex-lists/`へ新規ファイルとして保存します。
+
+## 継続レビュー
+
+テーマ別のレビューは`reports/reviews/<review-id>/`へ保存します。
+
+```text
+reports/reviews/<review-id>/
+├── article.md             # AppとCodexが更新する現在の本文
+├── review.json            # テーマ、改訂番号、引用、図の出典
+├── figures/               # Workspace内で抽出後、出典付きで複製した画像
+└── history/               # 更新前のMarkdownスナップショット
+```
+
+Appでレビューを選ぶと`.bukan/current-review.md`が更新され、Codexは
+`get_current_review`、`get_review`、`update_review`を使って同じテーマを継続的に
+改訂できます。重要な主張にはBukan文献IDとPDFページ・節を記録します。
+画像はPaperpileのPDFへ書き戻さず、Workspace内に抽出したファイルだけを
+`attach_review_figure`で複製し、元論文IDとページ番号を保持します。
 
 ## 整理モデル
 

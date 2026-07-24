@@ -403,13 +403,15 @@ dependencies = [
 
 [[package]]
 name = "bukan"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "blake3",
  "clap",
  "keyring",
  "portable-pty",
  "regex",
+ "reqwest",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",

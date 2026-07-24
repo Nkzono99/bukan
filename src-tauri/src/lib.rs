@@ -13,6 +13,7 @@ use walkdir::{DirEntry, WalkDir};
 
 pub mod mcp;
 pub mod organization;
+pub mod reviews;
 pub mod terminal;
 pub mod updates;
 pub mod workspace;
@@ -119,14 +120,61 @@ fn open_workspace(root: String) -> Result<workspace::WorkspaceDescriptor, String
 }
 
 #[tauri::command]
-fn suggest_organization(workspace_root: String) -> Result<organization::OrganizationPlan, String> {
-    let descriptor = workspace::describe_workspace(Path::new(&workspace_root))?;
-    let paperpile_root = descriptor
-        .paperpile_root
-        .ok_or_else(|| "Paperpileライブラリが見つかりません".to_string())?;
-    let index = build_index(Path::new(&paperpile_root))?;
-    let taxonomy = organization::load_taxonomy(Path::new(&descriptor.root))?;
-    Ok(organization::generate_plan(&index, &taxonomy))
+fn list_research_reviews(workspace_root: String) -> Result<Vec<reviews::ReviewSummary>, String> {
+    reviews::list_reviews(Path::new(&workspace_root))
+}
+
+#[tauri::command]
+fn get_research_review(
+    workspace_root: String,
+    review_id: String,
+) -> Result<reviews::ReviewDocument, String> {
+    reviews::load_review(Path::new(&workspace_root), &review_id)
+}
+
+#[tauri::command]
+fn save_research_review(
+    workspace_root: String,
+    review_id: String,
+    article: String,
+) -> Result<reviews::ReviewDocument, String> {
+    reviews::update_review(Path::new(&workspace_root), &review_id, &article, None)
+}
+
+#[tauri::command]
+fn set_current_research_review(
+    workspace_root: String,
+    review_id: String,
+) -> Result<String, String> {
+    reviews::set_current_review(Path::new(&workspace_root), &review_id)
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+#[tauri::command]
+fn ensure_managed_workspace(
+    app: AppHandle,
+    paperpile_root: String,
+) -> Result<workspace::WorkspaceDescriptor, String> {
+    let paperpile_root = normalize_library_root(Path::new(&paperpile_root))?;
+    let app_data_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("BukanのAppデータ保存先を開けませんでした: {error}"))?;
+    let workspace_root = managed_workspace_root(&app_data_root, &paperpile_root);
+    if workspace_root.join("bukan.toml").is_file() {
+        return workspace::describe_workspace(&workspace_root);
+    }
+
+    workspace::init_workspace(
+        &workspace_root,
+        Some("Bukan"),
+        Some(&paperpile_root.to_string_lossy()),
+    )
+}
+
+fn managed_workspace_root(app_data_root: &Path, paperpile_root: &Path) -> PathBuf {
+    let library_id = &blake3::hash(paperpile_root.to_string_lossy().as_bytes()).to_hex()[..20];
+    app_data_root.join("workspaces").join(library_id)
 }
 
 #[tauri::command]
@@ -640,7 +688,11 @@ pub fn run() {
             detect_libraries,
             initialize_workspace,
             open_workspace,
-            suggest_organization,
+            list_research_reviews,
+            get_research_review,
+            save_research_review,
+            set_current_research_review,
+            ensure_managed_workspace,
             scan_library,
             open_paper,
             reveal_paper,
@@ -677,6 +729,19 @@ mod tests {
         assert_eq!(authors.as_deref(), Some("Alemi"));
         assert_eq!(year, Some(2020));
         assert_eq!(title, "The Amazing Journey of Reason");
+    }
+
+    #[test]
+    fn managed_workspace_is_stable_and_kept_under_app_data() {
+        let app_data = Path::new(r"C:\Users\reader\AppData\Roaming\jp.bukan.literature");
+        let library = Path::new(r"G:\My Drive\Paperpile");
+        let first = managed_workspace_root(app_data, library);
+        let second = managed_workspace_root(app_data, library);
+        let expected_parent = app_data.join("workspaces");
+
+        assert_eq!(first, second);
+        assert!(first.starts_with(app_data));
+        assert_eq!(first.parent(), Some(expected_parent.as_path()));
     }
 
     #[test]

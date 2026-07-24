@@ -7,7 +7,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use crate::{build_index, workspace, LibraryIndex, PaperRecord};
+use crate::{build_index, reviews, workspace, LibraryIndex, PaperRecord};
 
 const MAX_PAPERS: usize = 250;
 const MAX_MESSAGE_BYTES: usize = 2 * 1024 * 1024;
@@ -61,6 +61,48 @@ struct SearchLibraryInput {
     year_to: Option<u16>,
     #[serde(default = "default_search_limit")]
     limit: usize,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateReviewInput {
+    theme: String,
+    #[serde(default)]
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewIdInput {
+    review_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UpdateReviewInput {
+    review_id: String,
+    markdown: String,
+    citations: Option<Vec<ReviewCitationInput>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReviewCitationInput {
+    paper_id: String,
+    #[serde(default)]
+    locator: String,
+    #[serde(default)]
+    note: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AttachReviewFigureInput {
+    review_id: String,
+    image_path: String,
+    caption: String,
+    source_paper_id: String,
+    page: Option<u32>,
 }
 
 fn default_search_limit() -> usize {
@@ -224,6 +266,68 @@ fn call_tool(workspace_root: &Path, params: &Value) -> Result<Value, String> {
                 .map_err(|error| format!("could not read current context: {error}"))?;
             Ok(tool_text(context))
         }
+        "create_review" => {
+            let input: CreateReviewInput = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid review: {error}"))?;
+            let title = (!input.title.trim().is_empty()).then_some(input.title.as_str());
+            let review = reviews::create_review(workspace_root, &input.theme, title)?;
+            Ok(tool_json(&review)?)
+        }
+        "list_reviews" => Ok(tool_json(&reviews::list_reviews(workspace_root)?)?),
+        "get_review" => {
+            let input: ReviewIdInput = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid review ID: {error}"))?;
+            Ok(tool_json(&reviews::load_review(
+                workspace_root,
+                &input.review_id,
+            )?)?)
+        }
+        "get_current_review" => {
+            let context_path = workspace_root.join(".bukan").join("current-review.md");
+            if !context_path.is_file() {
+                return Err("Bukanで現在のレビューが選択されていません".to_string());
+            }
+            let context = fs::read_to_string(context_path)
+                .map_err(|error| format!("could not read current review: {error}"))?;
+            Ok(tool_text(context))
+        }
+        "update_review" => {
+            let input: UpdateReviewInput = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid review update: {error}"))?;
+            let citations = input
+                .citations
+                .map(|citations| review_citations(workspace_root, citations))
+                .transpose()?;
+            let review = reviews::update_review(
+                workspace_root,
+                &input.review_id,
+                &input.markdown,
+                citations,
+            )?;
+            Ok(tool_json(&review)?)
+        }
+        "attach_review_figure" => {
+            let input: AttachReviewFigureInput = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid review figure: {error}"))?;
+            let index = workspace_index(workspace_root)?;
+            if !index.papers.iter().any(|paper| {
+                paper.id == input.source_paper_id || paper.legacy_id == input.source_paper_id
+            }) {
+                return Err(format!(
+                    "source paper was not found: {}",
+                    input.source_paper_id
+                ));
+            }
+            let review = reviews::attach_figure(
+                workspace_root,
+                &input.review_id,
+                Path::new(&input.image_path),
+                &input.caption,
+                &input.source_paper_id,
+                input.page,
+            )?;
+            Ok(tool_json(&review)?)
+        }
         _ => Err(format!("unknown tool: {name}")),
     }
 }
@@ -312,7 +416,121 @@ fn tool_definitions() -> Vec<Value> {
             "description": "Read the paper context currently selected in the Bukan Viewer.",
             "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
         }),
+        json!({
+            "name": "create_review",
+            "title": "Create a living research review",
+            "description": "Create a durable, theme-based review article project in reports/reviews. Use it when the user wants an accumulating literature review that can be revised over time.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["theme"],
+                "properties": {
+                    "theme": { "type": "string", "minLength": 1, "maxLength": 300 },
+                    "title": { "type": "string", "maxLength": 300 }
+                }
+            }
+        }),
+        json!({
+            "name": "list_reviews",
+            "title": "List living research reviews",
+            "description": "List the durable review projects currently accumulated in Bukan.",
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+        }),
+        json!({
+            "name": "get_review",
+            "title": "Read a research review",
+            "description": "Read a review's current Markdown, structured citations, figures, and revision metadata.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reviewId"],
+                "properties": {
+                    "reviewId": { "type": "string", "minLength": 1, "maxLength": 160 }
+                }
+            }
+        }),
+        json!({
+            "name": "get_current_review",
+            "title": "Get the current research review",
+            "description": "Read the living review currently selected in the Bukan App, including its review ID and article path.",
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+        }),
+        json!({
+            "name": "update_review",
+            "title": "Update a research review",
+            "description": "Replace the current review Markdown and optionally its structured citations. Bukan preserves the previous revision in history. Important claims must use citation markers such as [@paper-id, p. 12], and citations must identify local library papers.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reviewId", "markdown"],
+                "properties": {
+                    "reviewId": { "type": "string", "minLength": 1, "maxLength": 160 },
+                    "markdown": { "type": "string", "maxLength": 2000000 },
+                    "citations": {
+                        "type": "array",
+                        "maxItems": MAX_PAPERS,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": false,
+                            "required": ["paperId"],
+                            "properties": {
+                                "paperId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                                "locator": { "type": "string", "maxLength": 300, "description": "PDF page, section, figure, or table supporting the cited claim." },
+                                "note": { "type": "string", "maxLength": 2000 }
+                            }
+                        }
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "attach_review_figure",
+            "title": "Attach an extracted figure to a review",
+            "description": "Copy an image previously extracted into the Bukan workspace into a review's figures directory and record its source paper, page, and caption. The Paperpile PDF remains read-only.",
+            "inputSchema": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["reviewId", "imagePath", "caption", "sourcePaperId"],
+                "properties": {
+                    "reviewId": { "type": "string", "minLength": 1, "maxLength": 160 },
+                    "imagePath": { "type": "string", "minLength": 1, "maxLength": 2000 },
+                    "caption": { "type": "string", "maxLength": 2000 },
+                    "sourcePaperId": { "type": "string", "minLength": 1, "maxLength": 200 },
+                    "page": { "type": ["integer", "null"], "minimum": 1, "maximum": 100000 }
+                }
+            }
+        }),
     ]
+}
+
+fn review_citations(
+    workspace_root: &Path,
+    inputs: Vec<ReviewCitationInput>,
+) -> Result<Vec<reviews::ReviewCitation>, String> {
+    if inputs.len() > MAX_PAPERS {
+        return Err(format!(
+            "review citations are limited to {MAX_PAPERS} items"
+        ));
+    }
+    let index = workspace_index(workspace_root)?;
+    inputs
+        .into_iter()
+        .map(|input| {
+            let paper = index
+                .papers
+                .iter()
+                .find(|paper| paper.id == input.paper_id || paper.legacy_id == input.paper_id)
+                .ok_or_else(|| format!("cited paper was not found: {}", input.paper_id))?;
+            Ok(reviews::ReviewCitation {
+                paper_id: paper.id.clone(),
+                title: paper.title.clone(),
+                authors: paper.authors.clone().unwrap_or_default(),
+                year: paper.year,
+                locator: input.locator.trim().to_string(),
+                note: input.note.trim().to_string(),
+            })
+        })
+        .collect()
 }
 
 fn workspace_index(workspace_root: &Path) -> Result<LibraryIndex, String> {
@@ -637,6 +855,14 @@ mod tests {
         assert_eq!(tools[1]["name"], "clear_paper_list");
         assert!(tools.iter().any(|tool| tool["name"] == "search_library"));
         assert!(tools.iter().any(|tool| tool["name"] == "get_paper"));
+        assert!(tools.iter().any(|tool| tool["name"] == "create_review"));
+        assert!(tools
+            .iter()
+            .any(|tool| tool["name"] == "get_current_review"));
+        assert!(tools.iter().any(|tool| tool["name"] == "update_review"));
+        assert!(tools
+            .iter()
+            .any(|tool| tool["name"] == "attach_review_figure"));
     }
 
     #[test]

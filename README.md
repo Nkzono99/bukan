@@ -17,11 +17,13 @@ CLI と Tauri デスクトップアプリです。このリポジトリは Bukan
 - 検出できない場合の手動フォルダ選択
 - 外部ワークスペースの初期化・診断・全件走査
 - 開いている外部ワークスペースを VS Code で起動
-- App内のPTYで生のCodex TUIを起動（Workspace単位、`workspace-write`）
+- App内のPTYで生のCodex TUIを起動（PaperpileごとのApp管理作業領域、`workspace-write`）
 - Viewerで選択中の文献をCodexの作業コンテキストへ設定
 - CodexがMCPで提示した一時文献リストをViewerへ即時表示
 - MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
 - 一時文献リストを明示操作でWorkspaceのレポートまたは候補へ保存
+- テーマ別の継続レビューをMarkdown・構造化引用・出典付き図・改訂履歴として蓄積
+- Appで継続レビューを閲覧・編集し、現在のレビューをCodexへ引き継いで更新
 - PaperpileのPDF追加・削除・移動を監視し、索引を自動更新
 - private GitHub Releaseを起動時に確認し、GUIから署名検証付きで更新
 - `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
@@ -82,8 +84,8 @@ Windows 用の署名なし NSIS インストーラーをビルドし、Private G
 添付します。同時にTauri Updater用の`latest.json`と署名を生成します。
 
 ```powershell
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.2.0
+git push origin v0.2.0
 ```
 
 タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。
@@ -102,6 +104,9 @@ privateリポジトリへアクセスする認証は、次の順で自動検出�
 
 tokenを使う場合は対象リポジトリを`Nkzono99/bukan`、リポジトリ権限を
 `Contents: Read-only`に限定できます。tokenはWorkspaceや設定ファイルへ保存しません。
+各認証候補はGitHub Releases APIで検証され、期限切れの保存済みtokenがあっても
+次の候補へフォールバックします。GitHub CLIの状態は`gh auth status -h github.com`で
+確認でき、無効な場合は`gh auth login -h github.com`で再認証してください。
 
 Updater署名鍵はGitHub Actionsの`TAURI_SIGNING_PRIVATE_KEY` secretへ登録済みです。
 ローカルバックアップは`%USERPROFILE%\.tauri\bukan-updater.key`、パスワードの
@@ -126,3 +131,17 @@ Windows DPAPIバックアップは同じ場所の`bukan-updater.password.dpapi`�
 `p2-...` 形式です。PDF本文を開かないためDriveのオンデマンドファイルを実体化せず、
 コレクション間を移動しても同じ文献を追跡できます。旧版のパス由来IDも
 `legacyId` として返すため、既存連携は段階的に移行できます。
+
+## 継続レビュー
+
+CodexがBukan MCPの`create_review`でテーマを作ると、
+`reports/reviews/<review-id>/` に現在の本文`article.md`、構造化された引用情報
+`review.json`、過去の本文`history/`、出典付き画像`figures/`を保存します。
+Appはレビューの閲覧とMarkdown本文の直接編集に使い、「Codexで更新」を選ぶと対象が
+`.bukan/current-review.md`と`BUKAN_REVIEW_FILE`を通してCodexへ渡ります。
+
+CodexはBukan MCPの`search_library`、`get_paper`でローカル文献を確認し、
+`update_review`で本文と引用元の論文ID・ページまたは節を一緒に更新します。
+図を使う場合はPDFから抽出した画像をまずWorkspaceの`cache/`等へ保存し、
+`attach_review_figure`でレビューへ複製します。Paperpile内のPDFは常に読み取り専用で、
+図には元論文IDとページ番号を記録します。

@@ -135,6 +135,10 @@ impl CodexTerminalState {
             "BUKAN_CONTEXT_FILE",
             workspace_root.join(".bukan").join("current-context.md"),
         );
+        command_builder.env(
+            "BUKAN_REVIEW_FILE",
+            workspace_root.join(".bukan").join("current-review.md"),
+        );
         if let Some(paperpile_root) = paperpile_root {
             command_builder.env("BUKAN_PAPERPILE_ROOT", paperpile_root);
             command_builder.env("BUKAN_PAPERPILE_READ_ONLY", "true");

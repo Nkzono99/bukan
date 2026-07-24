@@ -46,3 +46,12 @@
 - The user may explicitly save a presented list from the Viewer. Saved reports go
   under `reports/codex-lists/`; candidate sets go under `candidates/codex-lists/`.
   Neither destination is inside Paperpile.
+- Living literature reviews are stored under `reports/reviews/<review-id>/`.
+  Use the Bukan MCP `create_review`, `list_reviews`, `get_review`,
+  `get_current_review`, and `update_review` tools to maintain them.
+- Important review claims must cite a local paper ID and an exact PDF page,
+  section, figure, or table locator. Never invent a quotation or locator.
+- To add a figure, first extract it into this workspace (normally under `cache/`),
+  then call `attach_review_figure` with its local library paper ID and PDF page.
+  Bukan copies the image into the review and records provenance; never write an
+  extracted image back into the Paperpile directory.
