@@ -25,6 +25,11 @@ enum Command {
     },
     /// Find mounted Paperpile libraries without modifying them.
     Detect,
+    /// Run the same read-only literature MCP as the desktop, without opening a GUI.
+    Mcp {
+        #[arg(default_value = ".")]
+        workspace: PathBuf,
+    },
     /// Validate workspace configuration and its Paperpile connection.
     Doctor {
         #[arg(default_value = ".")]
@@ -64,6 +69,10 @@ fn main() {
 
 fn run(cli: Cli) -> Result<(), String> {
     match cli.command {
+        Command::Mcp { workspace: root } => {
+            let (root, _) = workspace::load_workspace(&root)?;
+            bukan_lib::mcp::run_stdio(&root)?;
+        }
         Command::Init {
             path,
             name,

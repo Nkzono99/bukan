@@ -34,6 +34,11 @@ Paperpile 配下に対する書き込み・移動・削除操作は実装して�
 
 ## 開発
 
+文献間の発展関係と根拠を蓄積する独立パッケージの試作は、
+[Bukan Research](research-engine/README.md)を参照してください。既存の文献管理とは別のストアを使い、CLIとMCPから操作できます。
+全文レビューは文献別のサブエージェントへ割り当て、図表を埋め込んだノートと根拠を保存します。
+読了済みPDFの再利用、担当の重複防止、途中再開の手順は[並列レビュー](docs/parallel-review.md)にまとめています。
+
 必要環境は Node.js、Rust、Windows では WebView2 です。
 
 ```powershell
@@ -135,6 +140,9 @@ Windows DPAPIバックアップは同じ場所の`bukan-updater.password.dpapi`�
 `legacyId` として返すため、既存連携は段階的に移行できます。
 
 ## 継続レビュー
+
+文献管理MCPは、同期先PDFの総ページ数・本文・ページ画像を読み取り専用で取得できます。
+全ページ読解の手順、Popplerの準備、CLIからの起動は[PDF読解の使い方](docs/full-paper-reading.md)を参照してください。
 
 CodexがBukan MCPの`create_review`でテーマを作ると、
 `reports/reviews/<review-id>/` に現在の本文`article.md`、構造化された引用情報

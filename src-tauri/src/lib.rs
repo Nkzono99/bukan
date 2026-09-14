@@ -13,6 +13,7 @@ use walkdir::{DirEntry, WalkDir};
 
 pub mod mcp;
 pub mod organization;
+pub mod paper_document;
 pub mod reviews;
 pub mod terminal;
 pub mod updates;

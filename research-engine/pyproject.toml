@@ -1,0 +1,23 @@
+[project]
+name = "bukan-research"
+version = "0.1.0"
+description = "A local evidence and research-relation store with a thin MCP interface"
+requires-python = ">=3.11"
+dependencies = [
+    "markdown-it-py>=3,<5",
+    "mcp>=1.28,<2",
+    "pydantic>=2.11,<3",
+]
+
+[project.scripts]
+bukan-research = "bukan_research.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

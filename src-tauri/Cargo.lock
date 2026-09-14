@@ -405,6 +405,7 @@ dependencies = [
 name = "bukan"
 version = "0.2.2"
 dependencies = [
+ "base64 0.22.1",
  "blake3",
  "clap",
  "keyring",
@@ -414,6 +415,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",
