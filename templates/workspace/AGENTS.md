@@ -118,6 +118,15 @@
 ## Bukan and Codex
 
 - Bukan launches Codex with this workspace as its working directory.
+- After the in-app research setup, Bukan registers both the literature MCP and
+  the independent research MCP for this session. The app and research MCP share
+  `data/research.sqlite` (`BUKAN_RESEARCH_STORE`); reuse it instead of creating a
+  separate dataset for app requests.
+- When the user asks to continue a saved app request, read
+  `.bukan/current-research.md` (`BUKAN_RESEARCH_FILE`) and its referenced record
+  revisions or documents. Durable request copies live under `queries/requests/`.
+  Request storage alone does not start a worker; inspect existing review tasks
+  before resuming and update records so the app can show the resulting work.
 - `BUKAN_PAPERPILE_ROOT` identifies the mounted Paperpile library for read-only
   library-wide searches. `BUKAN_PAPERPILE_READ_ONLY=true` is a mandatory boundary,
   not a suggestion.

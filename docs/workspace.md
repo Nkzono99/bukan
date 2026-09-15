@@ -10,7 +10,10 @@ my-research/
 ├── AGENTS.md              # 文献調査時のルール
 ├── data/
 │   ├── paperpile.bib      # Paperpile BibTeXなどの読み取り用索引
-│   └── collections.json   # Workspace独自のコレクションと文献割り当て
+│   ├── collections.json   # Workspace独自のコレクションと文献割り当て
+│   ├── research.sqlite    # 研究エンジンの構造化記録（初回利用時に作成）
+│   ├── paper-notes/       # 文献ノートの改訂スナップショットと図表
+│   └── note-assets/       # 永続保存した原図・表のプレビュー
 ├── notes/                 # 文献ノート
 ├── queries/               # 再現可能な検索条件
 ├── candidates/            # Paperpileへ未登録の候補
@@ -35,6 +38,14 @@ my-research/
 
 ## Codexターミナル
 
+研究ホームの利用手順は[アプリで研究を進める](app-research.md)を参照してください。
+研究環境を準備すると、アプリの検索・編集と研究MCPが同じ`data/research.sqlite`を使います。
+Pythonと依存パッケージはAppDataへ保存し、研究フォルダには置きません。
+保存した調査依頼は`queries/requests/`へ蓄積します。最新の依頼と資料への参照は
+`.bukan/current-research.md`と`BUKAN_RESEARCH_FILE`を通してCodexへ引き継ぎます。
+準備済みの場合、起動時に文献管理MCPと研究MCPの両方をセッションへ登録します。
+研究エンジンはCLIの同梱ソースを使うため、インストール後に開発リポジトリは不要です。
+
 Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしたPowerShell
 PTYを埋め込み、その中でCodex CLIをバックグラウンド起動します。PowerShell 7を優先し、見つからない
 場合はWindows PowerShellを使用します。表示されるのはCodexの生のTUIであり、
@@ -43,8 +54,9 @@ Codex終了後はPowerShellプロンプトへ戻ります。
 
 起動時は `workspace-write` サンドボックスと `on-request` 承認を明示します。
 Paperpile同期フォルダを追加の書き込み可能ディレクトリには設定しません。
-読み取り元は`BUKAN_PAPERPILE_ROOT`、読み取り専用境界は
+同期先が接続されている場合、読み取り元は`BUKAN_PAPERPILE_ROOT`、読み取り専用境界は
 `BUKAN_PAPERPILE_READ_ONLY=true`としてCodexプロセスへ渡します。
+未接続でも保存済みの研究は開けます。研究DBの場所は`BUKAN_RESEARCH_STORE`で渡します。
 
 Viewerから文献をCodexコンテキストへ設定すると、
 `.bukan/current-context.md` に現在の文献ID、タイトル、コレクション、読み取り専用PDF

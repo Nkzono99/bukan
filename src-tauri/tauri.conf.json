@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost; object-src 'self' asset: http://asset.localhost; frame-src 'self' asset: http://asset.localhost",
+      "csp": "default-src 'self'; style-src-attr 'unsafe-inline'; connect-src ipc: http://ipc.localhost; img-src 'self' data: asset: http://asset.localhost; object-src 'self' asset: http://asset.localhost; frame-src 'self' asset: http://asset.localhost",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -34,6 +34,11 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "resources": {
+      "../research-engine/pyproject.toml": "research-engine/pyproject.toml",
+      "../research-engine/uv.lock": "research-engine/uv.lock",
+      "../research-engine/src/bukan_research/*.py": "research-engine/src/bukan_research/"
+    },
     "shortDescription": "Paperpile literature workspace",
     "longDescription": "A read-only viewer and organizer for literature synchronized by Paperpile."
   },

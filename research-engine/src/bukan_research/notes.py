@@ -34,6 +34,14 @@ def get_note(store: Store, record_id: str, revision: int | None = None):
             "markdown": "\n".join(lines).rstrip() + "\n"}
 
 
+def note_authoring_path(store: Store, record_id: str, revision: int):
+    """Return the legacy Markdown base for DB-authored links, without creating it."""
+    # Hashing allows all store IDs (including ':' on Windows), with no path traversal.
+    key = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
+    store_key = hashlib.sha256(store.path.name.encode("utf-8")).hexdigest()
+    return _export_path(store.path.parent / "paper-notes" / store_key / key / f"r{revision}.md")
+
+
 def export_note(store: Store, record_id: str, revision: int | None = None):
     """Export an immutable format-2 bundle, preserving legacy snapshots and DB text.
 
@@ -42,17 +50,14 @@ def export_note(store: Store, record_id: str, revision: int | None = None):
     to child assets, which standalone Markdown previews can load.
     """
     note = get_note(store, record_id, revision)
-    # Hashing allows all store IDs (including ':' on Windows), with no path traversal.
-    key = hashlib.sha256(record_id.encode("utf-8")).hexdigest()
-    store_key = hashlib.sha256(store.path.name.encode("utf-8")).hexdigest()
-    legacy_parent = store.path.parent / "paper-notes" / store_key / key
-    legacy = _export_path(legacy_parent / f"r{note['revision']}.md")
+    legacy = note_authoring_path(store, record_id, note["revision"])
+    legacy_parent = legacy.parent
     if legacy.exists():
         canonical = note["markdown"].replace("\r\n", "\n").replace("\r", "\n")
         if not legacy.is_file() or legacy.read_text(encoding="utf-8") != canonical:
             raise ValueError(f"Legacy export contains local edits; preserve them and update the note as a new revision: {legacy}")
     # Shorter format-2 hashes keep child assets within Windows path limits.
-    parent = store.path.parent / "paper-notes" / store_key[:16] / key[:32]
+    parent = store.path.parent / "paper-notes" / legacy_parent.parent.name[:16] / legacy_parent.name[:32]
     target = _export_path(parent / f"r{note['revision']}" / "index.md")
     content, assets = bundle_images(note["markdown"], legacy_parent, store.path.parent / "note-assets")
     files = {_export_path(target.parent / "assets" / name): data for name, data in assets.items()}

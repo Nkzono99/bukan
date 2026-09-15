@@ -14,6 +14,8 @@ use walkdir::{DirEntry, WalkDir};
 pub mod mcp;
 pub mod organization;
 pub mod paper_document;
+pub mod research;
+pub mod research_runtime;
 pub mod reviews;
 pub mod terminal;
 pub mod updates;
@@ -159,10 +161,25 @@ fn list_research_reviews(workspace_root: String) -> Result<Vec<reviews::ReviewSu
 
 #[tauri::command]
 fn get_research_review(
+    app: AppHandle,
     workspace_root: String,
     review_id: String,
 ) -> Result<reviews::ReviewDocument, String> {
-    reviews::load_review(Path::new(&workspace_root), &review_id)
+    let review = reviews::load_review(Path::new(&workspace_root), &review_id)?;
+    let document_path = Path::new(&review.directory)
+        .join("article.md")
+        .to_string_lossy()
+        .into_owned();
+    for figure in &review.figures {
+        // A missing preview must not hide the review text or its other figures.
+        let _ = research::resolve_research_asset(
+            app.clone(),
+            workspace_root.clone(),
+            document_path.clone(),
+            format!("figures/{}", figure.file),
+        );
+    }
+    Ok(review)
 }
 
 #[tauri::command]
@@ -170,7 +187,17 @@ fn save_research_review(
     workspace_root: String,
     review_id: String,
     article: String,
+    expected_revision: Option<u32>,
 ) -> Result<reviews::ReviewDocument, String> {
+    if let Some(expected) = expected_revision {
+        let current = reviews::load_review(Path::new(&workspace_root), &review_id)?;
+        if current.revision != expected {
+            return Err(
+                "レビューが別の操作で更新されています。下書きを保持して最新版と照合してください"
+                    .into(),
+            );
+        }
+    }
     reviews::update_review(Path::new(&workspace_root), &review_id, &article, None)
 }
 
@@ -750,6 +777,20 @@ pub fn run() {
             clear_codex_paper_list,
             persist_codex_paper_list,
             library_change_token,
+            research::research_workspace_status,
+            research::prepare_research_environment,
+            research::research_records,
+            research::research_record,
+            research::save_research_note,
+            research::read_research_document,
+            research::save_research_document,
+            research::resolve_research_asset,
+            research::resolve_research_link,
+            research::open_research_external,
+            research::get_research_pdf,
+            research::open_research_pdf,
+            research::save_research_request,
+            research::read_research_request,
             updates::update_auth_status,
             updates::save_update_github_token,
             updates::clear_update_github_token,

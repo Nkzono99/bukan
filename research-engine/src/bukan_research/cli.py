@@ -1,6 +1,8 @@
 import argparse
 import json
 from pathlib import Path
+import sqlite3
+import sys
 
 from .models import Write
 from .store import Store
@@ -14,6 +16,7 @@ def main():
     commands.add_parser("info")
     commands.add_parser("export")
     commands.add_parser("serve")
+    commands.add_parser("desktop", help="Read one versioned desktop JSON request from stdin")
     note = commands.add_parser("export-note")
     note.add_argument("id")
     note.add_argument("--revision", type=int)
@@ -40,6 +43,13 @@ def main():
                 result = store.info()
             case "export":
                 result = store.export()
+            case "desktop":
+                from .desktop import handle_request
+                try:
+                    request = json.loads(sys.stdin.read().lstrip("\ufeff"))
+                except RecursionError:
+                    raise ValueError("Desktop request JSON is nested too deeply.") from None
+                result = handle_request(store, request)
             case "serve":
                 from .server import create_server
                 store.info()
@@ -58,7 +68,7 @@ def main():
             case "trace":
                 result = store.trace(args.id, args.revision)
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    except (ValueError, OSError) as error:
+    except (ValueError, OSError, sqlite3.Error) as error:
         parser.exit(1, f"{error}\n")
 
 

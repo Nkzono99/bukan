@@ -6,6 +6,8 @@ import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
+import { bindResearchEvents, openResearchDocument, refreshResearch, researchTemplate, setResearchWorkspace, setResearchDemo } from "./research";
+import { renderResearchMarkdown, hydrateResearchMarkdown } from "./markdown";
 
 interface LibraryLocation {
   path: string;
@@ -179,7 +181,7 @@ interface CollectionNode {
 }
 
 type SortMode = "recent" | "title" | "year";
-type MainMode = "library" | "reviews";
+type MainMode = "research" | "library" | "reviews";
 type ThemeMode = "system" | "light" | "dark";
 
 const SIDEBAR_WIDTH = { min: 180, max: 420, initial: 228 };
@@ -212,6 +214,8 @@ const state: {
   sort: SortMode;
   mode: MainMode;
   selectedId: string | null;
+  researchPaper: PaperRecord | null;
+  requestedPdfPage: number | null;
   visibleLimit: number;
   error: string | null;
   collapsedCollections: Set<string>;
@@ -263,6 +267,8 @@ const state: {
   sort: "recent",
   mode: "library",
   selectedId: null,
+  researchPaper: null,
+  requestedPdfPage: null,
   visibleLimit: 120,
   error: null,
   collapsedCollections: new Set<string>(),
@@ -331,6 +337,18 @@ pdfPreviewHost.hidden = true;
 document.body.append(pdfPreviewHost);
 let pdfPreviewPaperId: string | null = null;
 let pdfPreviewPath: string | null = null;
+let workspaceEpoch = 0;
+let workspaceSelection = 0;
+let reviewLoadGeneration = 0;
+let codexStatusGeneration = 0;
+let codexStartOperation: Promise<void> | null = null;
+let codexStopOperation: Promise<void> | null = null;
+const pendingCodexOutput = new Map<number, string>();
+const reviewDrafts = new Map<string, { text: string; revision: number }>();
+let composingText = false;
+let deferredRender = false;
+
+function reviewDraftKey(root: string, id: string): string { return `${root}\n${id}`; }
 let pdfPreviewRevision = 0;
 let pdfPreviewResizeObserver: ResizeObserver | null = null;
 let codexTerminal: Terminal | null = null;
@@ -617,8 +635,8 @@ function onboardingTemplate(): string {
     <section class="onboarding-card">
       <div class="onboarding-mark"><span>B</span><i></i></div>
       <p class="eyebrow">LITERATURE WORKSPACE</p>
-      <h1>文献を、読む場所へ。</h1>
-      <p class="onboarding-copy">Paperpile のコレクションをそのままに、集めた PDF を横断して探し、読み進めるための静かなワークスペースです。</p>
+      <h1>文献から、研究を進める。</h1>
+      <p class="onboarding-copy">問い、文献、解析結果を研究ごとに保存します。原文を読み、Codexと相談しながら、先行研究の関係と次の課題を確かめられます。</p>
       <div class="connection-panel">
         <div class="panel-heading"><span>Bukan ワークスペース</span><em>推奨</em></div>
         <div class="workspace-choices">
@@ -647,15 +665,24 @@ function onboardingTemplate(): string {
 
 function sidebarTemplate(): string {
   const library = state.library;
-  if (!library) return "";
+  if (!library) return `<aside class="sidebar">
+    <div class="sidebar-header"><strong>${escapeHtml(state.workspaceName ?? "研究")}</strong></div>
+    <nav class="primary-nav"><button class="nav-item active" data-rail-action="research">研究ホーム</button>
+      <p class="offline-library-note">Paperpileが未接続でも、保存済みの研究を利用できます。</p></nav>
+    <div class="sidebar-footer"><div class="workspace-footer-actions">
+      <button class="open-workspace" type="button">研究を開く</button>
+      <button class="create-workspace" type="button">新しい研究</button>
+      <button class="reconnect-library" type="button">再接続</button>
+    </div></div></aside>`;
   const collectionTree = buildCollectionTree(library);
   const visibleCollectionCount = countCollectionNodes(collectionTree);
 
   return `<aside class="sidebar" aria-label="コレクション">
     <div class="sidebar-header"><span><strong>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</strong><small>${library.stats.paperCount} papers</small></span><button class="sidebar-close" type="button" title="サイドバーを格納" aria-label="サイドバーを格納">${icons.panel}</button></div>
     <nav class="primary-nav" aria-label="ライブラリ">
+      <button class="nav-item ${state.mode === "research" ? "active" : ""}" data-rail-action="research"><span>${icons.review}研究ホーム</span></button>
       <p class="nav-label">ライブラリ</p>
-      <button class="nav-item ${!state.collection && !state.starredOnly ? "active" : ""}" data-view="all">
+      <button class="nav-item ${state.mode === "library" && !state.collection && !state.starredOnly ? "active" : ""}" data-view="all">
         <span>${icons.library}すべての文献</span><em>${library.stats.paperCount}</em>
       </button>
       <button class="nav-item ${state.starredOnly ? "active" : ""}" data-view="starred">
@@ -677,6 +704,8 @@ function sidebarTemplate(): string {
     <div class="sidebar-footer">
       <div class="drive-status"><span>${state.workspaceRoot && !state.managedWorkspace ? icons.folder : icons.drive}</span><div><strong>${escapeHtml(state.workspaceName ?? "Google Drive")}</strong><small>${escapeHtml(state.managedWorkspace ? library.root : state.workspaceRoot ?? library.root)}</small></div><i></i></div>
       <div class="workspace-footer-actions">
+        <button class="open-workspace" type="button">研究を開く</button>
+        <button class="create-workspace" type="button">新しい研究</button>
         ${state.workspaceRoot && !state.managedWorkspace ? `<button class="open-vscode" type="button">${icons.code}<span>VS Codeで開く</span></button>` : ""}
         <button class="change-library" type="button">ライブラリを変更</button>
       </div>
@@ -691,6 +720,7 @@ function railTemplate(): string {
   return `<aside class="app-rail" aria-label="アプリナビゲーション">
     <button class="rail-brand" type="button" data-rail-action="sidebar" title="コレクションを開閉" aria-label="コレクションを開閉">B</button>
     <nav class="rail-nav">
+      <button class="rail-button ${state.mode === "research" ? "active" : ""}" type="button" data-rail-action="research" title="研究ホーム" aria-label="研究ホーム">${icons.review}</button>
       <button class="rail-button ${state.mode === "library" ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
       <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
       <button class="rail-button ${state.mode === "reviews" ? "active" : ""}" type="button" data-rail-action="reviews" title="継続レビュー" aria-label="継続レビュー">${icons.review}</button>
@@ -706,6 +736,9 @@ function railTemplate(): string {
 function commandPaletteTemplate(): string {
   if (!state.commandOpen) return "";
   const commands = [
+    ["research", icons.review, "研究ホームを開く", "研究"],
+    ["open-workspace", icons.folder, "研究ワークスペースを開く", "研究"],
+    ["create-workspace", icons.folder, "新しい研究を始める", "研究"],
     ["search", icons.search, "論文を検索", "現在のライブラリ"],
     ["all", icons.library, "すべての文献", "ライブラリ"],
     ["starred", icons.star, "スター付き文献", "ライブラリ"],
@@ -772,7 +805,8 @@ function paperRowTemplate(paper: PaperRecord): string {
 
 function pdfPreviewMarkup(paper: PaperRecord): string {
   if ("__TAURI_INTERNALS__" in window) {
-    const previewUrl = `${convertFileSrc(paper.path)}#pagemode=bookmarks`;
+    const previewUrl = `${convertFileSrc(paper.path)}#pagemode=bookmarks${state.requestedPdfPage ? `&page=${state.requestedPdfPage}` : ""}`;
+    state.requestedPdfPage = null;
     return `<object class="pdf-object" data="${escapeHtml(previewUrl)}" type="application/pdf">
       <div class="pdf-fallback"><p>PDF プレビューを表示できませんでした。</p><button class="action-button persistent-open-external">${icons.external}既定のアプリで開く</button></div>
     </object>
@@ -815,7 +849,7 @@ function updatePdfPreview(paper: PaperRecord): void {
 
 function attachPdfPreview(): void {
   const mount = document.querySelector<HTMLElement>(".pdf-preview-mount");
-  const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
+  const paper = selectedPaper();
   pdfPreviewResizeObserver?.disconnect();
   if (!mount || !paper) {
     pdfPreviewHost.hidden = true;
@@ -838,7 +872,7 @@ function attachPdfPreview(): void {
 }
 
 function viewerTemplate(): string {
-  const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
+  const paper = selectedPaper();
   if (!paper) {
     return `<section class="viewer empty-viewer">
       <div class="empty-document"><span>PDF</span><i></i><i></i><i></i></div>
@@ -856,7 +890,7 @@ function viewerTemplate(): string {
         <p>${escapeHtml([paper.authors, paper.year?.toString()].filter(Boolean).join(" · ") || paper.fileName)}</p>
       </div>
       <div class="viewer-actions">
-        ${state.workspaceRoot ? `<button class="icon-button set-codex-context ${state.codexContextPaperId === paper.id ? "context-active" : ""}" title="この論文をCodexのコンテキストに設定" aria-label="この論文をCodexのコンテキストに設定">${icons.context}</button>` : ""}
+          ${state.workspaceRoot && paper.identitySource !== "research-document" ? `<button class="icon-button set-codex-context ${state.codexContextPaperId === paper.id ? "context-active" : ""}" title="この論文をCodexのコンテキストに設定" aria-label="この論文をCodexのコンテキストに設定">${icons.context}</button>` : ""}
         <button class="icon-button reveal-paper" title="エクスプローラーで表示" aria-label="エクスプローラーで表示">${icons.reveal}</button>
         <button class="action-button open-external">${icons.external}<span>別ウィンドウで開く</span></button>
       </div>
@@ -952,7 +986,7 @@ function codexPaneTemplate(): string {
       <code>npm install -g @openai/codex</code>
       <button class="secondary-button retry-codex" type="button">再確認</button>
     </div>`;
-  } else if (!status.running) {
+  } else if (!status.running || status.workspaceRoot !== state.workspaceRoot) {
     body = `<div class="codex-empty">
       <span>${icons.terminal}</span>
       <h3>Codexセッションは終了しました</h3>
@@ -983,36 +1017,6 @@ function codexPaneTemplate(): string {
       <div class="codex-body-content">${body}</div>
     </div>
   </aside>`;
-}
-
-function reviewInlineTemplate(value: string): string {
-  return escapeHtml(value)
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/g, "<code>$1</code>")
-    .replace(/(\[@[A-Za-z0-9_-]+(?:,[^\]]+)?\])/g, '<span class="review-citation-marker">$1</span>');
-}
-
-function reviewArticleTemplate(review: ReviewDocument): string {
-  const lines = review.article.split(/\r?\n/);
-  return lines.map((line) => {
-    const image = line.match(/^!\[(.*)\]\(figures\/([^)]+)\)$/);
-    if (image) {
-      const figure = review.figures.find((candidate) => candidate.file === image[2]);
-      if (figure) {
-        const imagePath = `${review.directory}\\figures\\${figure.file}`;
-        return `<figure><img src="${escapeHtml(convertFileSrc(imagePath))}" alt="${escapeHtml(image[1] ?? figure.caption)}" /><figcaption>${escapeHtml(figure.caption)}${figure.page ? ` · p. ${figure.page}` : ""}</figcaption></figure>`;
-      }
-    }
-    const heading = line.match(/^(#{1,3})\s+(.+)$/);
-    if (heading) {
-      const level = heading[1]?.length ?? 1;
-      return `<h${level}>${reviewInlineTemplate(heading[2] ?? "")}</h${level}>`;
-    }
-    if (line.startsWith("> ")) return `<blockquote>${reviewInlineTemplate(line.slice(2))}</blockquote>`;
-    if (line.startsWith("- ")) return `<p class="review-bullet"><span>•</span>${reviewInlineTemplate(line.slice(2))}</p>`;
-    if (!line.trim()) return `<div class="review-paragraph-break"></div>`;
-    return `<p>${reviewInlineTemplate(line)}</p>`;
-  }).join("");
 }
 
 function reviewsTemplate(): string {
@@ -1050,8 +1054,8 @@ function reviewsTemplate(): string {
             </header>
             <div class="review-document-body">
               ${state.reviewEditing
-                ? `<textarea id="review-article-editor" spellcheck="true">${escapeHtml(review.article)}</textarea>`
-                : `<div class="review-article">${reviewArticleTemplate(review)}</div>`}
+                ? `<textarea id="review-article-editor" spellcheck="true" ${state.reviewSaving ? "disabled" : ""}>${escapeHtml(reviewDrafts.get(reviewDraftKey(state.workspaceRoot ?? "", review.id))?.text ?? review.article)}</textarea>`
+                : `<div class="review-article research-markdown">${renderResearchMarkdown(review.article)}</div>`}
               <aside class="review-evidence">
                 <section><h3>引用文献 <span>${review.citations.length}</span></h3>
                   ${review.citations.length
@@ -1071,7 +1075,7 @@ function reviewsTemplate(): string {
 
 function workspaceTemplate(): string {
   const papers = filteredPapers();
-  const currentTitle = state.mode === "reviews"
+  const currentTitle = state.mode === "research" ? "研究ホーム" : state.mode === "reviews"
     ? state.activeReview?.title ?? "継続レビュー"
     : state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers");
   return `<div class="workspace ${state.sidebarCollapsed ? "sidebar-collapsed" : ""}" style="--sidebar-width:${state.sidebarWidth}px;--paper-list-width:${state.paperListWidth}px">
@@ -1094,8 +1098,10 @@ function workspaceTemplate(): string {
           <button class="icon-button refresh-library ${state.scanning ? "spinning" : ""}" title="再読み込み" aria-label="再読み込み">${icons.refresh}</button>
         </div>
       </header>
-      ${state.mode === "reviews"
-        ? reviewsTemplate()
+      ${state.mode === "research"
+        ? `<div class="research-layout ${state.codexOpen ? "with-codex" : ""}">${researchTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`
+        : state.mode === "reviews"
+        ? `<div class="research-layout ${state.codexOpen ? "with-codex" : ""}">${reviewsTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`
         : `<div class="content-grid ${state.listCollapsed ? "list-collapsed" : ""} ${state.codexOpen ? "codex-open" : ""}">${paperListTemplate(papers)}${state.codexPaperListVisible ? codexPaperListTemplate() : viewerTemplate()}${state.codexOpen ? codexPaneTemplate() : ""}</div>`}
     </main>
     ${commandPaletteTemplate()}
@@ -1163,11 +1169,12 @@ function loadingTemplate(message = "Google Drive を探しています"): string
 }
 
 function render(): void {
+  if (composingText) { deferredRender = true; return; }
   applyTheme();
   codexTerminalHost.remove();
   let content = "";
   if (state.loading) content = loadingTemplate(state.loadingLabel);
-  else if (!state.library) content = onboardingTemplate();
+  else if (!state.library && !state.workspaceRoot) content = onboardingTemplate();
   else content = workspaceTemplate();
   app.innerHTML = content + updateDialogTemplate();
   attachPdfPreview();
@@ -1176,6 +1183,23 @@ function render(): void {
 }
 
 function bindEvents(): void {
+  bindResearchEvents({ render, openCodex: () => toggleCodex(true), openPaper: openResearchPaper });
+  const reviewArticle = document.querySelector<HTMLElement>(".review-article");
+  if (reviewArticle && state.activeReview && state.workspaceRoot) {
+    const root = state.workspaceRoot;
+    const epoch = workspaceEpoch;
+    const documentPath = `${state.activeReview.directory}/article.md`;
+    hydrateResearchMarkdown(reviewArticle, {
+      workspaceRoot: root, documentPath, onError: (message) => showToast(message, true),
+      onLink: async (href) => {
+        const link = await invoke<{kind:string;path:string;fragment:string}>("resolve_research_link", { workspaceRoot: root, documentPath, href });
+        if (epoch !== workspaceEpoch || !reviewArticle.isConnected) return;
+        if (link.kind === "external") await invoke("open_research_external", { url: link.path });
+        else if (link.kind === "pdf") openResearchPaper(link.path, Number(link.fragment.replace(/^page=/, "")) || undefined);
+        else { state.mode = "research"; render(); await openResearchDocument(link.path, link.fragment); }
+      },
+    });
+  }
   bindResizeHandles();
   document.querySelectorAll<HTMLElement>(".update-trigger").forEach((element) => {
     element.addEventListener("click", () => void checkForAppUpdate(false));
@@ -1194,6 +1218,8 @@ function bindEvents(): void {
       if (action === "sidebar") {
         state.sidebarCollapsed = !state.sidebarCollapsed;
         render();
+      } else if (action === "research") {
+        void openResearch();
       } else if (action === "library") {
         state.mode = "library";
         state.collection = null;
@@ -1295,24 +1321,16 @@ function bindEvents(): void {
     }
   });
   document.querySelectorAll<HTMLElement>("[data-library-path]").forEach((element) => {
-    element.addEventListener("click", () => {
-      state.workspaceRoot = null;
-      state.workspaceCollections = null;
-      state.workspaceName = null;
-      state.managedWorkspace = false;
-      state.codexPaperList = null;
-      state.codexPaperListVisible = false;
-      state.reviewSummaries = [];
-      state.activeReview = null;
-      state.reviewEditing = false;
-      void loadLibrary(element.dataset.libraryPath ?? "");
-    });
+    element.addEventListener("click", () => void openLibrary(element.dataset.libraryPath ?? ""));
   });
   document.querySelectorAll<HTMLElement>(".choose-folder, .change-library").forEach((element) => {
     element.addEventListener("click", () => void chooseLibrary());
   });
   document.querySelector<HTMLElement>(".open-workspace")?.addEventListener("click", () => void chooseWorkspace(false));
   document.querySelector<HTMLElement>(".create-workspace")?.addEventListener("click", () => void chooseWorkspace(true));
+  document.querySelector<HTMLElement>(".reconnect-library")?.addEventListener("click", () => {
+    if (state.workspaceRoot) void openWorkspace(state.workspaceRoot);
+  });
   document.querySelector<HTMLElement>("[data-view='all']")?.addEventListener("click", () => {
     if (state.mode === "library" && !state.collection && !state.starredOnly) return;
     state.mode = "library";
@@ -1335,13 +1353,24 @@ function bindEvents(): void {
   });
   document.querySelector<HTMLElement>(".edit-review")?.addEventListener("click", () => {
     state.reviewEditing = true;
+    if (state.workspaceRoot && state.activeReview) {
+      const key = reviewDraftKey(state.workspaceRoot, state.activeReview.id);
+      if (!reviewDrafts.has(key)) reviewDrafts.set(key, { text: state.activeReview.article, revision: state.activeReview.revision });
+    }
     render();
     window.setTimeout(() => document.querySelector<HTMLTextAreaElement>("#review-article-editor")?.focus(), 0);
   });
   document.querySelector<HTMLElement>(".cancel-review-edit")?.addEventListener("click", () => {
     state.reviewEditing = false;
+    if (state.workspaceRoot && state.activeReview) reviewDrafts.delete(reviewDraftKey(state.workspaceRoot, state.activeReview.id));
     render();
   });
+  const reviewEditor = document.querySelector<HTMLTextAreaElement>("#review-article-editor");
+  if (reviewEditor && state.workspaceRoot && state.activeReview) {
+    const key = reviewDraftKey(state.workspaceRoot, state.activeReview.id);
+    const revision = reviewDrafts.get(key)?.revision ?? state.activeReview.revision;
+    reviewEditor.addEventListener("input", () => reviewDrafts.set(key, { text: reviewEditor.value, revision }));
+  }
   document.querySelector<HTMLElement>(".save-review")?.addEventListener("click", () => void saveReview());
   document.querySelector<HTMLElement>(".review-with-codex")?.addEventListener("click", () => void updateReviewWithCodex());
   document.querySelectorAll<HTMLElement>("[data-collection]").forEach((element) => {
@@ -1414,7 +1443,8 @@ function bindEvents(): void {
     render();
   });
   document.querySelector<HTMLElement>(".refresh-library")?.addEventListener("click", () => {
-    if (state.library) void loadLibrary(state.library.root, true);
+    if (state.mode === "research") void refreshResearch();
+    else if (state.library) void loadLibrary(state.library.root, true);
   });
   document.querySelectorAll<HTMLElement>(".open-external").forEach((element) => {
     element.addEventListener("click", () => void runPaperAction("open_paper"));
@@ -1473,42 +1503,48 @@ function bindResizeHandles(): void {
 
 async function createWorkspaceCollection(path: string): Promise<void> {
   if (!state.workspaceRoot || !path || state.collectionSaving) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
   state.collectionSaving = true;
   render();
   try {
-    state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("create_workspace_collection", {
-      workspaceRoot: state.workspaceRoot,
+    const collections = await invoke<WorkspaceCollectionIndex>("create_workspace_collection", {
+      workspaceRoot: root,
       collectionPath: path,
     });
+    if (epoch !== workspaceEpoch) return;
+    state.workspaceCollections = collections;
     state.creatingCollection = false;
     showToast(`Workspace / All / ${displayCollectionPath(path)} を作成しました`);
   } catch (error) {
-    showToast(String(error), true);
+    if (epoch === workspaceEpoch) showToast(String(error), true);
   } finally {
-    state.collectionSaving = false;
-    render();
+    if (epoch === workspaceEpoch) { state.collectionSaving = false; render(); }
   }
 }
 
 async function updateWorkspaceCollectionMembership(path: string, member: boolean): Promise<void> {
   if (!state.workspaceRoot || !state.selectedId || !path || state.collectionSaving) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
   const paperId = state.selectedId;
   state.collectionSaving = true;
   try {
-    state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("set_workspace_collection_membership", {
-      workspaceRoot: state.workspaceRoot,
+    const collections = await invoke<WorkspaceCollectionIndex>("set_workspace_collection_membership", {
+      workspaceRoot: root,
       collectionPath: path,
       paperId,
       member,
     });
+    if (epoch !== workspaceEpoch) return;
+    state.workspaceCollections = collections;
     showToast(member
       ? "選択中の文献をWorkspaceコレクションへ追加しました"
       : "選択中の文献をWorkspaceコレクションから外しました");
   } catch (error) {
-    showToast(String(error), true);
+    if (epoch === workspaceEpoch) showToast(String(error), true);
   } finally {
-    state.collectionSaving = false;
-    render();
+    if (epoch === workspaceEpoch) { state.collectionSaving = false; render(); }
   }
 }
 
@@ -1533,7 +1569,13 @@ function focusLibrarySearch(): void {
 
 function executeCommand(action: string): void {
   state.commandOpen = false;
-  if (action === "search") {
+  if (action === "research") {
+    void openResearch();
+  } else if (action === "open-workspace") {
+    void chooseWorkspace(false);
+  } else if (action === "create-workspace") {
+    void chooseWorkspace(true);
+  } else if (action === "search") {
     focusLibrarySearch();
   } else if (action === "all" || action === "starred") {
     state.mode = "library";
@@ -1580,7 +1622,7 @@ function ensureCodexTerminal(): void {
   codexTerminal.loadAddon(codexFitAddon);
   codexTerminal.open(codexTerminalHost);
   codexTerminal.onData((data) => {
-    if (!state.codexStatus?.running) return;
+    if (state.loading || !state.codexStatus?.running || state.codexStatus.workspaceRoot !== state.workspaceRoot) return;
     void invoke("write_codex_terminal", { data }).catch((error) => {
       state.codexError = String(error);
       showToast(state.codexError, true);
@@ -1594,7 +1636,7 @@ function ensureCodexTerminal(): void {
 
 function attachCodexTerminal(): void {
   const mount = document.querySelector<HTMLElement>(".codex-terminal-mount");
-  if (!mount || !state.codexOpen || !state.codexStatus?.running) return;
+  if (!mount || !state.codexOpen || !state.codexStatus?.running || state.codexStatus.workspaceRoot !== state.workspaceRoot) return;
   mount.append(codexTerminalHost);
   ensureCodexTerminal();
   codexResizeObserver?.disconnect();
@@ -1602,7 +1644,7 @@ function attachCodexTerminal(): void {
   codexResizeObserver.observe(mount);
   window.requestAnimationFrame(() => {
     fitAndResizeCodex();
-    codexTerminal?.focus();
+    if (!document.activeElement?.matches("input, textarea, select, [contenteditable='true']")) codexTerminal?.focus();
   });
 }
 
@@ -1632,7 +1674,11 @@ function fitAndResizeCodex(): void {
 async function setupCodexEventListeners(): Promise<void> {
   if (!("__TAURI_INTERNALS__" in window)) return;
   await listen<CodexTerminalOutput>("codex-terminal-output", ({ payload }) => {
-    if (state.codexStatus?.sessionId && payload.sessionId !== state.codexStatus.sessionId) return;
+    if (state.loading) return;
+    if (state.codexStatus?.sessionId !== payload.sessionId || state.codexStatus.workspaceRoot !== state.workspaceRoot) {
+      if (state.codexStarting) pendingCodexOutput.set(payload.sessionId, `${pendingCodexOutput.get(payload.sessionId) ?? ""}${payload.data}`.slice(-4_000_000));
+      return;
+    }
     if (codexTerminal) {
       codexTerminal.write(payload.data);
     } else {
@@ -1641,6 +1687,7 @@ async function setupCodexEventListeners(): Promise<void> {
   });
   await listen<CodexTerminalExit>("codex-terminal-exit", ({ payload }) => {
     if (state.codexStatus?.sessionId !== payload.sessionId) return;
+    codexStatusGeneration += 1;
     state.codexStatus = {
       ...state.codexStatus,
       running: false,
@@ -1786,29 +1833,60 @@ async function openReviews(): Promise<void> {
     return;
   }
   state.mode = "reviews";
-  state.reviewEditing = false;
+  state.reviewEditing = !!state.activeReview && reviewDrafts.has(reviewDraftKey(state.workspaceRoot, state.activeReview.id));
   render();
   await refreshReviews(true);
 }
 
+async function openResearch(): Promise<void> {
+  state.mode = "research";
+  render();
+  await refreshResearch();
+}
+
+function selectedPaper(): PaperRecord | undefined {
+  return state.researchPaper?.id === state.selectedId ? state.researchPaper : state.library?.papers.find((paper) => paper.id === state.selectedId);
+}
+
+function openResearchPaper(path: string, page?: number): void {
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
+  if (!root) return;
+  void invoke<PaperRecord>("get_research_pdf", { workspaceRoot: root, path }).then((paper) => {
+    if (epoch !== workspaceEpoch) return;
+    const normalize = (value: string) => value.replace(/^\\\\\?\\/, "").replaceAll("\\", "/").toLocaleLowerCase();
+    const indexed = state.library?.papers.find((candidate) => normalize(candidate.path) === normalize(paper.path));
+    state.researchPaper = indexed ? null : paper;
+    state.selectedId = indexed?.id ?? paper.id;
+    state.requestedPdfPage = page && Number.isInteger(page) && page > 0 ? page : null;
+    pdfPreviewPath = null;
+    state.mode = "library";
+    state.codexPaperListVisible = false;
+    render();
+  }).catch((error) => { if (epoch === workspaceEpoch) showToast(String(error), true); });
+}
+
 async function refreshReviews(selectFirst = false): Promise<void> {
-  if (!state.workspaceRoot || !("__TAURI_INTERNALS__" in window)) return;
+  if (state.loading || !state.workspaceRoot || !("__TAURI_INTERNALS__" in window)) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
   try {
     const summaries = await invoke<ReviewSummary[]>("list_research_reviews", {
-      workspaceRoot: state.workspaceRoot,
+      workspaceRoot: root,
     });
+    if (root !== state.workspaceRoot || epoch !== workspaceEpoch) return;
     const activeSummary = summaries.find((review) => review.id === state.activeReview?.id);
     const activeChanged = activeSummary && activeSummary.updatedAt !== state.activeReview?.updatedAt;
     state.reviewSummaries = summaries;
-    if (activeChanged) {
+    if (activeChanged && !state.reviewEditing && !state.reviewLoading) {
       await loadReview(activeSummary.id, false);
       return;
     }
-    if (selectFirst && !state.activeReview && summaries[0]) {
+    if (selectFirst && !state.activeReview && !state.reviewLoading && summaries[0]) {
       await loadReview(summaries[0].id, false);
       return;
     }
-    if (state.mode === "reviews") render();
+    if (state.mode === "reviews" && !state.reviewEditing) render();
   } catch (error) {
     console.warn("Could not refresh research reviews", error);
   }
@@ -1816,61 +1894,82 @@ async function refreshReviews(selectFirst = false): Promise<void> {
 
 async function loadReview(reviewId: string, showLoading = true): Promise<void> {
   if (!state.workspaceRoot || !reviewId) return;
-  state.mode = "reviews";
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
+  const generation = ++reviewLoadGeneration;
+  if (showLoading) state.mode = "reviews";
   state.reviewEditing = false;
+  state.reviewLoading = true;
   if (showLoading) {
-    state.reviewLoading = true;
     render();
   }
   try {
-    state.activeReview = await invoke<ReviewDocument>("get_research_review", {
-      workspaceRoot: state.workspaceRoot,
+    const review = await invoke<ReviewDocument>("get_research_review", {
+      workspaceRoot: root,
       reviewId,
     });
+    if (epoch !== workspaceEpoch || generation !== reviewLoadGeneration) return;
+    state.activeReview = review;
+    state.reviewEditing = reviewDrafts.has(reviewDraftKey(root, reviewId));
     await invoke("set_current_research_review", {
-      workspaceRoot: state.workspaceRoot,
+      workspaceRoot: root,
       reviewId,
     });
   } catch (error) {
-    showToast(String(error), true);
+    if (epoch === workspaceEpoch && generation === reviewLoadGeneration) showToast(String(error), true);
   } finally {
-    state.reviewLoading = false;
-    render();
+    if (epoch === workspaceEpoch && generation === reviewLoadGeneration) {
+      state.reviewLoading = false;
+      render();
+    }
   }
 }
 
 async function saveReview(): Promise<void> {
   if (!state.workspaceRoot || !state.activeReview || state.reviewSaving) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
+  const reviewId = state.activeReview.id;
+  const key = reviewDraftKey(root, reviewId);
+  const expectedRevision = reviewDrafts.get(key)?.revision ?? state.activeReview.revision;
   const article = document.querySelector<HTMLTextAreaElement>("#review-article-editor")?.value;
   if (article === undefined) return;
   state.reviewSaving = true;
   render();
   try {
-    state.activeReview = await invoke<ReviewDocument>("save_research_review", {
-      workspaceRoot: state.workspaceRoot,
-      reviewId: state.activeReview.id,
-      article,
+    const saved = await invoke<ReviewDocument>("save_research_review", {
+      workspaceRoot: root, reviewId, article, expectedRevision,
     });
+    const draft = reviewDrafts.get(key);
+    if (draft?.revision === expectedRevision) {
+      if (draft.text === article) reviewDrafts.delete(key);
+      else draft.revision = saved.revision;
+    }
+    if (epoch !== workspaceEpoch || state.activeReview?.id !== reviewId) return;
+    state.activeReview = saved;
     state.reviewEditing = false;
     await refreshReviews();
-    showToast(`改訂 ${state.activeReview.revision} を保存しました`);
+    if (epoch === workspaceEpoch) showToast(`改訂 ${saved.revision} を保存しました`);
   } catch (error) {
-    showToast(String(error), true);
+    if (epoch === workspaceEpoch) showToast(String(error), true);
   } finally {
-    state.reviewSaving = false;
-    render();
+    if (epoch === workspaceEpoch) { state.reviewSaving = false; render(); }
   }
 }
 
 async function updateReviewWithCodex(): Promise<void> {
   if (!state.workspaceRoot) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
+  const review = state.activeReview;
   try {
-    if (state.activeReview) {
+    if (review) {
       await invoke("set_current_research_review", {
-        workspaceRoot: state.workspaceRoot,
-        reviewId: state.activeReview.id,
+        workspaceRoot: root,
+        reviewId: review.id,
       });
-      showToast(`Codexへ「${state.activeReview.title}」を現在のレビューとして設定しました`);
+      if (epoch !== workspaceEpoch) return;
+      showToast(`Codexへ「${review.title}」を現在のレビューとして設定しました`);
     } else {
       showToast("Codexへテーマを伝えると、MCP経由で継続レビューを作成できます");
     }
@@ -1881,6 +1980,8 @@ async function updateReviewWithCodex(): Promise<void> {
 }
 
 async function refreshCodexStatus(showErrors = false): Promise<CodexRuntimeStatus | null> {
+  const epoch = workspaceEpoch;
+  const generation = ++codexStatusGeneration;
   if (!("__TAURI_INTERNALS__" in window)) {
     state.codexStatus = {
       available: false,
@@ -1895,10 +1996,16 @@ async function refreshCodexStatus(showErrors = false): Promise<CodexRuntimeStatu
   }
   try {
     state.codexError = null;
-    state.codexStatus = await invoke<CodexRuntimeStatus>("codex_runtime_status");
+    if (codexStartOperation) await codexStartOperation;
+    if (codexStopOperation) await codexStopOperation;
+    if (epoch !== workspaceEpoch || generation !== codexStatusGeneration) return null;
+    const status = await invoke<CodexRuntimeStatus>("codex_runtime_status");
+    if (epoch !== workspaceEpoch || generation !== codexStatusGeneration) return null;
+    state.codexStatus = status;
     render();
     return state.codexStatus;
   } catch (error) {
+    if (epoch !== workspaceEpoch || generation !== codexStatusGeneration) return null;
     state.codexError = String(error);
     if (showErrors) showToast(state.codexError, true);
     render();
@@ -1907,6 +2014,8 @@ async function refreshCodexStatus(showErrors = false): Promise<CodexRuntimeStatu
 }
 
 async function toggleCodex(force?: boolean): Promise<void> {
+  if (state.loading) return;
+  const epoch = workspaceEpoch;
   const next = force ?? !state.codexOpen;
   if (next && !state.workspaceRoot) {
     showToast("Codexを使うには、先にBukanワークスペースを開いてください", true);
@@ -1918,27 +2027,55 @@ async function toggleCodex(force?: boolean): Promise<void> {
     render();
     return;
   }
-  state.mode = "library";
   render();
+  if (codexStartOperation) await codexStartOperation;
+  if (codexStopOperation) await codexStopOperation.catch(() => undefined);
+  if (epoch !== workspaceEpoch || !state.codexOpen) return;
   const status = await refreshCodexStatus();
-  if (status?.available && !status.running) await startCodexTerminal();
+  if (epoch !== workspaceEpoch || !state.codexOpen) return;
+  if (status?.running && status.workspaceRoot !== state.workspaceRoot) {
+    try { await stopCodexSession(); }
+    catch (error) { showToast(String(error), true); return; }
+  }
+  if (epoch !== workspaceEpoch || !state.codexOpen) return;
+  if (status?.available && (!status.running || status.workspaceRoot !== state.workspaceRoot)) await startCodexTerminal();
 }
 
-async function startCodexTerminal(): Promise<void> {
+function startCodexTerminal(): Promise<void> {
+  if (state.loading || !state.workspaceRoot) return Promise.resolve();
+  if (codexStartOperation) return codexStartOperation;
+  codexStartOperation = launchCodexTerminal().finally(() => { codexStartOperation = null; });
+  return codexStartOperation;
+}
+
+async function launchCodexTerminal(): Promise<void> {
   if (!state.workspaceRoot || state.codexStarting) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
+  codexStatusGeneration += 1;
   state.codexOpen = true;
   state.codexStarting = true;
   state.codexError = null;
+  state.codexStatus = null;
   codexBacklog = "";
+  pendingCodexOutput.clear();
   codexTerminal?.reset();
   render();
   try {
-    state.codexStatus = await invoke<CodexRuntimeStatus>("start_codex_terminal", {
-      workspaceRoot: state.workspaceRoot,
+    if (codexStopOperation) await codexStopOperation;
+    if (epoch !== workspaceEpoch) return;
+    const status = await invoke<CodexRuntimeStatus>("start_codex_terminal", {
+      workspaceRoot: root,
       cols: codexTerminal?.cols ?? 110,
       rows: codexTerminal?.rows ?? 32,
     });
+    if (epoch !== workspaceEpoch) return;
+    state.codexStatus = status;
+    const output = status.sessionId === null ? "" : pendingCodexOutput.get(status.sessionId) ?? "";
+    if (codexTerminal) codexTerminal.write(output);
+    else codexBacklog = output;
   } catch (error) {
+    if (epoch !== workspaceEpoch) return;
     state.codexError = String(error);
     state.codexStatus = {
       available: !state.codexError.includes("見つかりません"),
@@ -1951,19 +2088,33 @@ async function startCodexTerminal(): Promise<void> {
     showToast(state.codexError, true);
   } finally {
     state.codexStarting = false;
-    render();
+    pendingCodexOutput.clear();
+    if (epoch === workspaceEpoch) render();
   }
 }
 
-async function stopCodexTerminal(): Promise<void> {
-  try {
+function stopCodexSession(): Promise<void> {
+  if (codexStopOperation) return codexStopOperation;
+  const epoch = workspaceEpoch;
+  const starting = codexStartOperation;
+  codexStatusGeneration += 1;
+  codexStopOperation = (async () => {
+    if (starting) await starting;
     await invoke("stop_codex_terminal");
+    if (epoch !== workspaceEpoch) return;
     if (state.codexStatus) {
       state.codexStatus.running = false;
       state.codexStatus.sessionId = null;
       state.codexStatus.workspaceRoot = null;
     }
     render();
+  })().finally(() => { codexStopOperation = null; });
+  return codexStopOperation;
+}
+
+async function stopCodexTerminal(): Promise<void> {
+  try {
+    await stopCodexSession();
   } catch (error) {
     showToast(String(error), true);
   }
@@ -1972,12 +2123,15 @@ async function stopCodexTerminal(): Promise<void> {
 let codexPaperListPolling = false;
 
 async function refreshCodexPaperList(): Promise<void> {
-  if (!state.workspaceRoot || codexPaperListPolling || !("__TAURI_INTERNALS__" in window)) return;
+  if (state.loading || !state.workspaceRoot || codexPaperListPolling || !("__TAURI_INTERNALS__" in window)) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
   codexPaperListPolling = true;
   try {
     const next = await invoke<PresentedPaperList | null>("get_codex_paper_list", {
-      workspaceRoot: state.workspaceRoot,
+      workspaceRoot: root,
     });
+    if (root !== state.workspaceRoot || epoch !== workspaceEpoch) return;
     const changed = next?.updatedAt !== state.codexPaperList?.updatedAt;
     if (!changed) return;
     const hadList = Boolean(state.codexPaperList);
@@ -1996,8 +2150,10 @@ async function refreshCodexPaperList(): Promise<void> {
 
 async function clearCodexPaperList(): Promise<void> {
   if (!state.workspaceRoot) return;
+  const epoch = workspaceEpoch;
   try {
     await invoke("clear_codex_paper_list", { workspaceRoot: state.workspaceRoot });
+    if (epoch !== workspaceEpoch) return;
     state.codexPaperList = null;
     state.codexPaperListVisible = false;
     render();
@@ -2022,9 +2178,11 @@ async function persistCodexPaperList(destination: string): Promise<void> {
 async function setSelectedPaperAsCodexContext(): Promise<void> {
   const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
   if (!paper || !state.workspaceRoot) return;
+  const root = state.workspaceRoot;
+  const epoch = workspaceEpoch;
   try {
     await invoke<string>("set_codex_paper_context", {
-      workspaceRoot: state.workspaceRoot,
+      workspaceRoot: root,
       paperPath: paper.path,
       paperId: paper.id,
       title: paper.title,
@@ -2032,6 +2190,7 @@ async function setSelectedPaperAsCodexContext(): Promise<void> {
       year: paper.year,
       collections: paper.collections,
     });
+    if (epoch !== workspaceEpoch) return;
     state.codexContextPaperId = paper.id;
     showToast("現在の論文をCodexコンテキストに設定しました");
     if (!state.codexOpen) await toggleCodex(true);
@@ -2043,8 +2202,10 @@ async function setSelectedPaperAsCodexContext(): Promise<void> {
 
 function clearCodexContext(): void {
   if (!state.workspaceRoot) return;
+  const epoch = workspaceEpoch;
   void invoke("clear_codex_paper_context", { workspaceRoot: state.workspaceRoot })
     .then(() => {
+      if (epoch !== workspaceEpoch) return;
       state.codexContextPaperId = null;
       render();
     })
@@ -2065,90 +2226,143 @@ async function openWorkspaceInVsCode(): Promise<void> {
 }
 
 async function runPaperAction(command: "open_paper" | "reveal_paper"): Promise<void> {
-  const paper = state.library?.papers.find((candidate) => candidate.id === state.selectedId);
+  const paper = selectedPaper();
   if (!paper) return;
   try {
-    await invoke(command, { path: paper.path });
+    if (paper.identitySource === "research-document") {
+      await invoke("open_research_pdf", { workspaceRoot: state.workspaceRoot, path: paper.path, reveal: command === "reveal_paper" });
+    } else await invoke(command, { path: paper.path });
   } catch (error) {
     showToast(String(error), true);
   }
 }
 
 async function chooseLibrary(): Promise<void> {
+  const selection = ++workspaceSelection;
   try {
     const selected = await open({ directory: true, multiple: false, title: "Paperpile フォルダを選択" });
-    if (selected) {
-      if (state.codexStatus?.running) await invoke("stop_codex_terminal");
-      state.workspaceRoot = null;
-      state.workspaceName = null;
-      state.managedWorkspace = false;
-      state.codexOpen = false;
-      state.codexStatus = null;
-      state.codexContextPaperId = null;
-      state.codexPaperList = null;
-      state.codexPaperListVisible = false;
-      state.reviewSummaries = [];
-      state.activeReview = null;
-      state.reviewEditing = false;
-      state.libraryChangeToken = null;
-      state.libraryLastCheckedAt = null;
-      localStorage.removeItem("bukan.workspaceRoot");
-      await loadLibrary(selected);
-    }
+    if (selected && selection === workspaceSelection) await openLibrary(selected);
   } catch (error) {
+    if (selection !== workspaceSelection) return;
     state.error = String(error);
     render();
   }
 }
 
 async function chooseWorkspace(create: boolean): Promise<void> {
+  const selection = ++workspaceSelection;
   try {
     const selected = await open({
       directory: true,
       multiple: false,
       title: create ? "ワークスペースを作成するフォルダ" : "Bukan ワークスペースを選択",
     });
-    if (!selected) return;
-    state.loadingLabel = create ? "ワークスペースを初期化しています" : "ワークスペースを開いています";
-    state.loading = true;
-    render();
-    const descriptor = create
-      ? await invoke<WorkspaceDescriptor>("initialize_workspace", { root: selected, name: null, paperpilePath: "auto" })
-      : await invoke<WorkspaceDescriptor>("open_workspace", { root: selected });
-    await activateWorkspace(descriptor);
+    if (selected && selection === workspaceSelection) await openWorkspace(selected, create);
   } catch (error) {
+    if (selection !== workspaceSelection) return;
+    state.error = String(error);
+    render();
+  }
+}
+
+function beginWorkspaceSwitch(label: string): number {
+  workspaceSelection += 1;
+  workspaceEpoch += 1;
+  state.loadingLabel = label;
+  state.loading = true;
+  state.scanning = false;
+  state.reviewLoading = false;
+  state.reviewSaving = false;
+  state.collectionSaving = false;
+  state.codexOpen = false;
+  render();
+  return workspaceEpoch;
+}
+
+function resetWorkspace(descriptor: WorkspaceDescriptor | null): void {
+  state.workspaceRoot = descriptor?.root ?? null;
+  state.workspaceName = descriptor?.name ?? null;
+  state.library = null;
+  state.selectedId = null;
+  state.researchPaper = null;
+  state.requestedPdfPage = null;
+  state.collection = null;
+  state.starredOnly = false;
+  state.query = "";
+  state.visibleLimit = 120;
+  state.mode = "research";
+  state.codexOpen = false;
+  state.workspaceCollections = null;
+  state.collectionSaving = false;
+  state.creatingCollection = false;
+  state.managedWorkspace = false;
+  state.codexStatus = null;
+  state.codexError = null;
+  state.codexContextPaperId = null;
+  state.codexPaperList = null;
+  state.codexPaperListVisible = false;
+  state.codexPaperListSelection = 0;
+  state.reviewSummaries = [];
+  state.activeReview = null;
+  state.reviewEditing = false;
+  state.reviewLoading = false;
+  state.reviewSaving = false;
+  state.libraryChangeToken = null;
+  state.libraryLastCheckedAt = null;
+  state.error = null;
+  codexBacklog = "";
+  pendingCodexOutput.clear();
+  codexTerminal?.reset();
+  setResearchWorkspace(state.workspaceRoot, state.workspaceName);
+  if (descriptor) localStorage.setItem("bukan.workspaceRoot", descriptor.root);
+  else localStorage.removeItem("bukan.workspaceRoot");
+}
+
+async function openLibrary(root: string): Promise<void> {
+  if (!root) return;
+  const epoch = beginWorkspaceSwitch("Paperpile ライブラリを読み取っています");
+  try {
+    await stopCodexSession();
+    if (epoch !== workspaceEpoch) return;
+    resetWorkspace(null);
+    await loadLibrary(root);
+  } catch (error) {
+    if (epoch !== workspaceEpoch) return;
     state.loading = false;
     state.error = String(error);
     render();
   }
 }
 
-async function activateWorkspace(descriptor: WorkspaceDescriptor): Promise<void> {
-  if (!descriptor.paperpileRoot) {
-    throw new Error("マウント済みの Paperpile が見つかりません。bukan.toml の paperpile.path を確認してください。");
+async function openWorkspace(root: string, create = false): Promise<boolean> {
+  const epoch = beginWorkspaceSwitch(create ? "ワークスペースを初期化しています" : "ワークスペースを開いています");
+  try {
+    const descriptor = create
+      ? await invoke<WorkspaceDescriptor>("initialize_workspace", { root, name: null, paperpilePath: "auto" })
+      : await invoke<WorkspaceDescriptor>("open_workspace", { root });
+    if (epoch !== workspaceEpoch) return false;
+    await stopCodexSession();
+    if (epoch !== workspaceEpoch) return false;
+    resetWorkspace(descriptor);
+    state.loading = false;
+    render();
+    await Promise.all([
+      refreshResearch(),
+      descriptor.paperpileRoot ? loadLibrary(descriptor.paperpileRoot, true) : refreshReviews(),
+    ]);
+    return true;
+  } catch (error) {
+    if (epoch !== workspaceEpoch) return false;
+    state.loading = false;
+    state.error = String(error);
+    render();
+    return false;
   }
-  if (state.workspaceRoot && state.workspaceRoot !== descriptor.root && state.codexStatus?.running) {
-    await invoke("stop_codex_terminal");
-  }
-  state.workspaceRoot = descriptor.root;
-  state.workspaceCollections = null;
-  state.workspaceName = descriptor.name;
-  state.managedWorkspace = false;
-  state.codexStatus = null;
-  state.codexContextPaperId = null;
-  state.codexPaperList = null;
-  state.codexPaperListVisible = false;
-  state.reviewSummaries = [];
-  state.activeReview = null;
-  state.reviewEditing = false;
-  state.libraryChangeToken = null;
-  state.libraryLastCheckedAt = null;
-  localStorage.setItem("bukan.workspaceRoot", descriptor.root);
-  await loadLibrary(descriptor.paperpileRoot);
 }
 
 async function loadLibrary(root: string, quiet = false): Promise<void> {
   if (!root) return;
+  const epoch = workspaceEpoch;
   const previous = state.library?.root === root ? state.library : null;
   state.error = null;
   if (quiet) {
@@ -2161,36 +2375,47 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
   }
   try {
     const index = await invoke<LibraryIndex>("scan_library", { root });
+    if (epoch !== workspaceEpoch) return;
     if (!state.workspaceRoot) {
       try {
         const descriptor = await invoke<WorkspaceDescriptor>("ensure_managed_workspace", {
           paperpileRoot: index.root,
         });
+        if (epoch !== workspaceEpoch) return;
         state.workspaceRoot = descriptor.root;
         state.workspaceName = null;
         state.managedWorkspace = true;
+        state.mode = "research";
+        setResearchWorkspace(descriptor.root, descriptor.name);
+        void refreshResearch();
       } catch (error) {
+        if (epoch !== workspaceEpoch) return;
         console.warn("Could not prepare the managed Codex workspace", error);
         showToast(`Codexの作業領域を準備できませんでした: ${String(error)}`, true);
       }
     }
     state.library = index;
     if (state.workspaceRoot) {
+      const workspaceRoot = state.workspaceRoot;
       try {
-        state.workspaceCollections = await invoke<WorkspaceCollectionIndex>("load_workspace_collections", {
-          workspaceRoot: state.workspaceRoot,
+        const collections = await invoke<WorkspaceCollectionIndex>("load_workspace_collections", {
+          workspaceRoot,
           seeds: index.papers.map((paper) => ({
             paperId: paper.id,
             collections: paper.collections,
           })),
         });
+        if (epoch !== workspaceEpoch || workspaceRoot !== state.workspaceRoot) return;
+        state.workspaceCollections = collections;
       } catch (error) {
+        if (epoch !== workspaceEpoch) return;
         console.warn("Could not load Workspace collections", error);
         showToast(`Workspaceコレクションを読み取れませんでした: ${String(error)}`, true);
       }
     }
     await refreshReviews();
-    state.selectedId = state.selectedId && index.papers.some((paper) => paper.id === state.selectedId) ? state.selectedId : null;
+    if (epoch !== workspaceEpoch) return;
+    state.selectedId = state.selectedId && (state.researchPaper?.id === state.selectedId || index.papers.some((paper) => paper.id === state.selectedId)) ? state.selectedId : null;
     localStorage.setItem("bukan.paperpileRoot", index.root);
     if (quiet) {
       const previousIds = new Set(previous?.papers.map((paper) => paper.id) ?? []);
@@ -2204,13 +2429,16 @@ async function loadLibrary(root: string, quiet = false): Promise<void> {
       showToast(changes ? `Paperpile更新 · ${changes} · 全${index.stats.paperCount}件` : `${index.stats.paperCount}件を再読込しました`);
     }
   } catch (error) {
+    if (epoch !== workspaceEpoch) return;
     state.error = String(error);
     if (!quiet) state.library = null;
   } finally {
-    state.loading = false;
-    state.scanning = false;
-    render();
-    window.setTimeout(() => void refreshLibraryChangeToken(), 0);
+    if (epoch === workspaceEpoch) {
+      state.loading = false;
+      state.scanning = false;
+      render();
+      window.setTimeout(() => void refreshLibraryChangeToken(), 0);
+    }
   }
 }
 
@@ -2226,15 +2454,19 @@ async function refreshLibraryChangeToken(): Promise<void> {
   ) return;
 
   libraryChangePolling = true;
+  const epoch = workspaceEpoch;
   try {
     const root = state.library.root;
     const result = await invoke<LibraryChangeToken>("library_change_token", { root });
+    if (epoch !== workspaceEpoch || state.library?.root !== root) return;
     const previousToken = state.libraryChangeToken;
     state.libraryLastCheckedAt = result.checkedAt;
     state.libraryChangeToken = result.token;
     if (previousToken && previousToken !== result.token && state.library?.root === root) {
       await loadLibrary(root, true);
+      if (epoch !== workspaceEpoch) return;
       const refreshed = await invoke<LibraryChangeToken>("library_change_token", { root });
+      if (epoch !== workspaceEpoch) return;
       state.libraryChangeToken = refreshed.token;
       state.libraryLastCheckedAt = refreshed.checkedAt;
     } else if (!previousToken) {
@@ -2374,6 +2606,8 @@ async function initialize(): Promise<void> {
     };
     state.workspaceRoot = "C:\\demo\\workspace";
     state.workspaceName = "Bukan";
+    setResearchDemo();
+    state.mode = "research";
     if (new URLSearchParams(window.location.search).has("reviews")) {
       const review = demoReview();
       state.mode = "reviews";
@@ -2397,19 +2631,18 @@ async function initialize(): Promise<void> {
   try {
     const savedWorkspace = localStorage.getItem("bukan.workspaceRoot");
     if (savedWorkspace) {
-      try {
-        const descriptor = await invoke<WorkspaceDescriptor>("open_workspace", { root: savedWorkspace });
-        await activateWorkspace(descriptor);
-        return;
-      } catch {
-        localStorage.removeItem("bukan.workspaceRoot");
-      }
+      const epoch = workspaceEpoch + 1;
+      if (await openWorkspace(savedWorkspace) || epoch !== workspaceEpoch) return;
+      localStorage.removeItem("bukan.workspaceRoot");
     }
-    state.locations = await invoke<LibraryLocation[]>("detect_libraries");
+    const epoch = workspaceEpoch;
+    const locations = await invoke<LibraryLocation[]>("detect_libraries");
+    if (epoch !== workspaceEpoch) return;
+    state.locations = locations;
     const savedRoot = localStorage.getItem("bukan.paperpileRoot");
     const preferred = savedRoot ?? (state.locations.length === 1 ? state.locations[0]?.path : null);
     if (preferred) {
-      await loadLibrary(preferred);
+      await openLibrary(preferred);
       return;
     }
   } catch (error) {
@@ -2443,13 +2676,19 @@ window.addEventListener("keydown", (event) => {
     event.preventDefault();
     state.sidebarCollapsed = !state.sidebarCollapsed;
     render();
-  } else if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "j" && state.library) {
+  } else if ((event.ctrlKey || event.metaKey) && event.key.toLocaleLowerCase() === "j" && state.workspaceRoot) {
     event.preventDefault();
     void toggleCodex();
   } else if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLocaleLowerCase() === "k" && state.selectedId) {
     event.preventDefault();
     void setSelectedPaperAsCodexContext();
   }
+});
+
+document.addEventListener("compositionstart", () => { composingText = true; });
+document.addEventListener("compositionend", () => {
+  composingText = false;
+  if (deferredRender) { deferredRender = false; queueMicrotask(render); }
 });
 
 window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {

@@ -12,7 +12,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter};
 
-use crate::{is_pdf, workspace};
+use crate::{is_pdf, research_runtime, workspace};
 
 const DEFAULT_COLS: u16 = 110;
 const DEFAULT_ROWS: u16 = 32;
@@ -112,11 +112,19 @@ impl CodexTerminalState {
         rows: Option<u16>,
     ) -> Result<CodexRuntimeStatus, String> {
         let (workspace_root, config) = workspace::load_workspace(workspace_root)?;
-        let paperpile_root = workspace::resolve_paperpile_root(&workspace_root, &config)?;
+        // Saved research remains available when the mounted source library is
+        // offline. Library tools report unavailable PDFs when they are requested.
+        let paperpile_root = workspace::resolve_paperpile_root(&workspace_root, &config)
+            .ok()
+            .flatten();
         let command = find_codex_command().ok_or_else(|| {
             "Codex CLIが見つかりません。Codexをインストールしてから再試行してください".to_string()
         })?;
-        let mcp_overrides = mcp_config_overrides(&workspace_root)?;
+        let mut mcp_overrides = mcp_config_overrides(&workspace_root)?;
+        mcp_overrides.extend(research_runtime::mcp_config_overrides(
+            &app,
+            &workspace_root,
+        )?);
         let size = PtySize {
             rows: rows.unwrap_or(DEFAULT_ROWS).clamp(8, 500),
             cols: cols.unwrap_or(DEFAULT_COLS).clamp(20, 500),
@@ -138,6 +146,14 @@ impl CodexTerminalState {
         command_builder.env(
             "BUKAN_REVIEW_FILE",
             workspace_root.join(".bukan").join("current-review.md"),
+        );
+        command_builder.env(
+            "BUKAN_RESEARCH_FILE",
+            workspace_root.join(".bukan").join("current-research.md"),
+        );
+        command_builder.env(
+            "BUKAN_RESEARCH_STORE",
+            research_runtime::store_path(&workspace_root)?,
         );
         if let Some(paperpile_root) = paperpile_root {
             command_builder.env("BUKAN_PAPERPILE_ROOT", paperpile_root);
@@ -312,6 +328,7 @@ fn command_builder(
 ) -> Result<CommandBuilder, String> {
     #[cfg(target_os = "windows")]
     {
+        validate_command_script_paths(command, workspace_root, config_overrides)?;
         let powershell = find_powershell_command().ok_or_else(|| {
             "PowerShellが見つかりません。PowerShell 7またはWindows PowerShellを確認してください"
                 .to_string()
@@ -340,6 +357,25 @@ fn command_builder(
         }
         Ok(builder)
     }
+}
+
+#[cfg(target_os = "windows")]
+fn validate_command_script_paths(
+    command: &CodexCommand,
+    workspace_root: &Path,
+    config_overrides: &[String],
+) -> Result<(), String> {
+    if let CodexCommand::CommandScript(path) = command {
+        // cmd expands %NAME% even inside double quotes, and may pair percents
+        // across arguments. Native codex.exe has no such expansion layer.
+        if path.to_string_lossy().contains('%')
+            || workspace_root.to_string_lossy().contains('%')
+            || config_overrides.iter().any(|value| value.contains('%'))
+        {
+            return Err("Codexのcmd起動では % を含むパスを正確に渡せません。Codex実行ファイル (codex.exe) を利用してください".into());
+        }
+    }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
@@ -387,6 +423,7 @@ fn windows_powershell_command_string(
         format!("'{}'", value.replace('\'', "''"))
     }
 
+    let command_script = matches!(command, CodexCommand::CommandScript(_));
     let command = match command {
         CodexCommand::Direct(path) | CodexCommand::CommandScript(path) => path,
     };
@@ -404,7 +441,15 @@ fn windows_powershell_command_string(
     }
     let arguments = arguments
         .iter()
-        .map(|argument| quote(argument))
+        .map(|argument| {
+            if command_script {
+                // cmd parses metacharacters even inside PowerShell literals.
+                // Keep every batch argument grouped, including paths without spaces.
+                quote(&format!("\"{argument}\""))
+            } else {
+                quote(argument)
+            }
+        })
         .collect::<Vec<_>>()
         .join(" ");
     format!(
@@ -419,15 +464,12 @@ fn mcp_config_overrides(workspace_root: &Path) -> Result<Vec<String>, String> {
         .map_err(|error| format!("Bukan MCPの実行ファイルを特定できませんでした: {error}"))?;
     let executable = executable.to_string_lossy();
     let workspace_root = workspace_root.to_string_lossy();
-    if executable.contains('\'') || workspace_root.contains('\'') {
-        return Err(
-            "BukanまたはWorkspaceのパスにアポストロフィがあるためMCPを設定できません".to_string(),
-        );
-    }
+    // Codex treats values which are not valid TOML (absolute paths) as raw
+    // strings. This avoids PowerShell 5 stripping embedded double quotes.
     Ok(vec![
-        format!("mcp_servers.bukan.command='{executable}'"),
+        format!("mcp_servers.bukan.command={executable}"),
         "mcp_servers.bukan.args=['--bukan-mcp-stdio']".to_string(),
-        format!("mcp_servers.bukan.env.BUKAN_WORKSPACE='{workspace_root}'"),
+        format!("mcp_servers.bukan.env.BUKAN_WORKSPACE={workspace_root}"),
         "mcp_servers.bukan.required=true".to_string(),
     ])
 }
@@ -446,6 +488,7 @@ fn codex_version(command: &CodexCommand) -> Result<String, String> {
         CodexCommand::CommandScript(path) => {
             #[cfg(target_os = "windows")]
             {
+                validate_command_script_paths(command, Path::new(""), &[])?;
                 Command::new("cmd.exe")
                     .args([
                         "/D",
@@ -631,10 +674,90 @@ mod tests {
             ],
         );
         assert!(command.contains("& 'C:\\Users\\Test User"));
-        assert!(command.contains("'G:\\マイドライブ\\Bukan Workspaces\\Lunar 100%'"));
-        assert!(command.contains("'--sandbox' 'workspace-write'"));
+        assert!(command.contains("'\"G:\\マイドライブ\\Bukan Workspaces\\Lunar 100%\"'"));
+        assert!(command.contains("'\"--sandbox\"' '\"workspace-write\"'"));
         assert!(command.contains("mcp_servers.bukan.command="));
         assert!(command.contains("''C:\\Program Files\\Bukan\\bukan.exe''"));
         assert!(command.contains("$LASTEXITCODE"));
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn refuses_cmd_environment_expansion_but_allows_native_paths() {
+        let script = CodexCommand::CommandScript(PathBuf::from(r"C:\tools\codex.cmd"));
+        let native = CodexCommand::Direct(PathBuf::from(r"C:\tools\codex.exe"));
+        let workspace = Path::new(r"C:\Research%TEMP%\workspace");
+        assert!(validate_command_script_paths(&script, workspace, &[]).is_err());
+        assert!(validate_command_script_paths(&native, workspace, &[]).is_ok());
+        let percent_script = CodexCommand::CommandScript(PathBuf::from(r"C:\%USER%\codex.cmd"));
+        assert!(
+            validate_command_script_paths(&percent_script, Path::new(r"C:\work"), &[]).is_err()
+        );
+        assert!(validate_command_script_paths(
+            &script,
+            Path::new(r"C:\work"),
+            &["command=C:\\100%\\python.exe".into()]
+        )
+        .is_err());
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    #[ignore = "runs Windows PowerShell and compiles a temporary argv probe"]
+    fn legacy_powershell_preserves_mcp_overrides_for_executable_and_cmd_shim() {
+        let temporary = tempfile::tempdir().unwrap();
+        let executable = temporary.path().join("argv probe.exe");
+        let capture = temporary.path().join("argv.txt");
+        let powershell = std::env::var_os("SystemRoot")
+            .map(PathBuf::from)
+            .unwrap()
+            .join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        let program = r#"using System; using System.IO; using System.Text;
+            public class Program { public static void Main(string[] args) {
+            File.WriteAllLines(Environment.GetEnvironmentVariable("BUKAN_TEST_ARGV"), args, new UTF8Encoding(false)); } }"#;
+        let compiled = Command::new(&powershell)
+            .args(["-NoProfile", "-NonInteractive", "-Command",
+                "Add-Type -TypeDefinition $env:BUKAN_TEST_SOURCE -OutputAssembly $env:BUKAN_TEST_EXE -OutputType ConsoleApplication"])
+            .env("BUKAN_TEST_SOURCE", program)
+            .env("BUKAN_TEST_EXE", &executable)
+            .output().unwrap();
+        assert!(
+            compiled.status.success(),
+            "{}",
+            String::from_utf8_lossy(&compiled.stderr)
+        );
+        let shim = temporary.path().join("codex&shim.cmd");
+        fs::write(&shim, format!("@\"{}\" %*\r\n", executable.display())).unwrap();
+        let workspace = Path::new(r"C:\研究 O'Brien\$env:HOME `literal` & more");
+        let overrides = vec![
+            r"mcp_servers.bukan.command=C:\Program Files\O'Brien\bukan.exe".into(),
+            r"mcp_servers.bukan_research.command=C:\A&B\python.exe".into(),
+            r"mcp_servers.bukan_research.args=['-I','-B','-X','utf8','-c','import base64,json,sys; exec(base64.b64decode(sys.argv[1]))','cHJpbnQoMSk=']".into(),
+        ];
+        for command in [
+            CodexCommand::Direct(executable),
+            CodexCommand::CommandScript(shim),
+        ] {
+            validate_command_script_paths(&command, workspace, &overrides).unwrap();
+            let output = Command::new(&powershell)
+                .args(["-NoProfile", "-NonInteractive", "-Command"])
+                .arg(windows_powershell_command_string(
+                    &command, workspace, &overrides,
+                ))
+                .env("BUKAN_TEST_ARGV", &capture)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let captured = fs::read_to_string(&capture).unwrap();
+            let arguments = captured.lines().collect::<Vec<_>>();
+            assert_eq!(arguments[1], workspace.to_str().unwrap());
+            assert_eq!(arguments[7], overrides[0]);
+            assert_eq!(arguments[9], overrides[1]);
+            assert_eq!(arguments[11], overrides[2]);
+        }
     }
 }

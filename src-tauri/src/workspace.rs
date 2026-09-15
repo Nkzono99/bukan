@@ -40,6 +40,7 @@ pub struct WorkspaceDescriptor {
     pub version: u32,
     pub paperpile_root: Option<String>,
     pub paperpile_mode: String,
+    pub paperpile_error: Option<String>,
 }
 
 pub fn init_workspace(
@@ -47,6 +48,15 @@ pub fn init_workspace(
     name: Option<&str>,
     paperpile_path: Option<&str>,
 ) -> Result<WorkspaceDescriptor, String> {
+    let absolute = if root.is_absolute() {
+        root.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .map_err(|e| e.to_string())?
+            .join(root)
+    };
+    let destination = crate::research_runtime::resolve_destination(&absolute)?;
+    crate::research_runtime::validate_storage_location(&destination)?;
     if root.join("bukan.toml").exists() {
         return Err("このフォルダはすでにBukanワークスペースです".to_string());
     }
@@ -118,13 +128,18 @@ pub fn load_workspace(root: &Path) -> Result<(PathBuf, WorkspaceConfig), String>
 
 pub fn describe_workspace(root: &Path) -> Result<WorkspaceDescriptor, String> {
     let (root, config) = load_workspace(root)?;
-    let paperpile_root = resolve_paperpile_root(&root, &config)?;
+    // Saved research remains usable while Drive is disconnected.
+    let (paperpile_root, paperpile_error) = match resolve_paperpile_root(&root, &config) {
+        Ok(root) => (root, None),
+        Err(error) => (None, Some(error)),
+    };
     Ok(WorkspaceDescriptor {
         root: root.to_string_lossy().into_owned(),
         name: config.name,
         version: config.version,
         paperpile_root: paperpile_root.map(|path| path.to_string_lossy().into_owned()),
         paperpile_mode: config.paperpile.path,
+        paperpile_error,
     })
 }
 
@@ -187,6 +202,30 @@ mod tests {
         init_workspace(temporary.path(), None, None).expect("first init");
         let error = init_workspace(temporary.path(), None, None).expect_err("second init fails");
         assert!(error.contains("すでに"));
+    }
+
+    #[test]
+    fn refuses_to_initialize_inside_source_or_paperpile() {
+        let temporary = tempfile::tempdir().unwrap();
+        let library = temporary.path().join("Paperpile");
+        fs::create_dir_all(library.join("All Papers")).unwrap();
+        assert!(init_workspace(&library.join("research"), None, None).is_err());
+        assert!(!library.join("research").exists());
+        let repo = temporary.path().join("app");
+        fs::create_dir_all(repo.join("src-tauri")).unwrap();
+        fs::write(repo.join("src-tauri/Cargo.toml"), "[package]").unwrap();
+        assert!(init_workspace(&repo.join("research"), None, None).is_err());
+        assert!(!repo.join("research").exists());
+    }
+
+    #[test]
+    fn opens_saved_research_while_paperpile_is_offline() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("research");
+        let missing = temporary.path().join("missing-drive/Paperpile");
+        let descriptor = init_workspace(&root, None, Some(&missing.to_string_lossy())).unwrap();
+        assert!(descriptor.paperpile_root.is_none());
+        assert!(descriptor.paperpile_error.is_some());
     }
 
     #[test]
