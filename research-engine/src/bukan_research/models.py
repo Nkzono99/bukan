@@ -158,7 +158,103 @@ class ReviewTask(Model):
         return self
 
 
-Entity = Annotated[Paper | Source | Evidence | Claim | Relation | Question | Topic | PaperNote | ReviewTask,
+class WikiBasis(Ref):
+    section_id: Identifier | None = None
+    relation: Literal["supports", "challenges", "context"] = "supports"
+
+
+class WikiAudit(Model):
+    reviewer: Text
+    reviewed_revision: int = Field(ge=1)
+    reviewed_at: Text
+    findings: str = ""
+
+
+class WikiSection(Model):
+    id: Identifier
+    title: Text
+    markdown: str = Field(default="", max_length=200000)
+    basis: list[WikiBasis] = Field(default_factory=list, max_length=500)
+    interpretation: Literal["analyst_inference", "author_explicit", "human_proposal"] = "analyst_inference"
+    review_status: Literal["unverified", "migration_unverified", "independently_reviewed", "issues_open"] = "unverified"
+    audit: list[WikiAudit] = Field(default_factory=list)
+    source_files: list[str] = Field(default_factory=list)
+
+
+class WikiPage(Model):
+    kind: Literal["wiki_page"] = "wiki_page"
+    id: Identifier
+    title: Text
+    summary: str = Field(default="", max_length=20000)
+    page_type: Literal["portal", "theme", "concept", "model", "method", "material", "question", "comparison", "history", "glossary"] = "concept"
+    aliases: list[str] = Field(default_factory=list)
+    categories: list[str] = Field(default_factory=list)
+    parent_ids: list[Identifier] = Field(default_factory=list)
+    navigation: list[Identifier] = Field(default_factory=list)
+    sections: list[WikiSection] = Field(default_factory=list, max_length=200)
+    change_reason: str = ""
+    search_through: str = ""
+    verified_at: str = ""
+    source_files: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def unique_sections(self):
+        if len({section.id for section in self.sections}) != len(self.sections):
+            raise ValueError("Wiki section IDs must be unique within a page.")
+        return self
+
+
+class WikiTask(Model):
+    kind: Literal["wiki_task"] = "wiki_task"
+    id: Identifier
+    page: Ref
+    section_id: Identifier | None = None
+    purpose: Text
+    conditions: str = ""
+    search_through: str = ""
+    state: Literal["pending", "running", "completed", "needs_followup"] = "pending"
+    worker: str = ""
+    checkpoint: str = ""
+    reason: str = ""
+    outcome: Literal["revised", "unchanged", "incomplete"] | None = None
+    result_page: Ref | None = None
+    candidates: list[Ref] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def completion(self):
+        if self.state == "running" and not self.worker.strip():
+            raise ValueError("A running wiki task needs a worker.")
+        if self.state == "completed" and (self.outcome not in {"revised", "unchanged"} or not self.reason.strip()):
+            raise ValueError("A completed wiki task needs a revised/unchanged outcome and a reason.")
+        if self.outcome == "revised" and self.result_page is None:
+            raise ValueError("A revised wiki task needs a pinned result_page.")
+        if self.state == "needs_followup" and not self.reason.strip():
+            raise ValueError("An unfinished wiki task needs a reason.")
+        return self
+
+
+class WikiCandidate(Model):
+    kind: Literal["wiki_candidate"] = "wiki_candidate"
+    id: Identifier
+    record: Ref
+    page_id: Identifier | None = None
+    state: Literal["pending", "accepted", "rejected", "integrated"] = "pending"
+    reason: str = ""
+    suggested_page_ids: list[Identifier] = Field(default_factory=list)
+    result_page: Ref | None = None
+
+    @model_validator(mode="after")
+    def decision(self):
+        if self.state != "pending" and not self.reason.strip():
+            raise ValueError("Candidate decisions need a reason.")
+        if self.state in {"accepted", "integrated"} and not self.page_id:
+            raise ValueError("Accepted candidates need a destination wiki page.")
+        if self.state == "integrated" and self.result_page is None:
+            raise ValueError("Integrated candidates need a pinned result_page.")
+        return self
+
+
+Entity = Annotated[Paper | Source | Evidence | Claim | Relation | Question | Topic | PaperNote | ReviewTask | WikiPage | WikiTask | WikiCandidate,
                    Field(discriminator="kind")]
 ENTITY = TypeAdapter(Entity)
 
@@ -190,5 +286,14 @@ def references(entity: Entity) -> list[tuple[Ref, set[str]]]:
         case ReviewTask():
             return [(entity.paper, {"paper"})] + (
                 [(entity.result_note, {"paper_note"})] if entity.result_note else [])
+        case WikiPage():
+            return [(ref, {"paper", "source", "evidence", "claim", "relation", "question", "topic", "paper_note", "wiki_page"})
+                    for section in entity.sections for ref in section.basis]
+        case WikiTask():
+            return [(entity.page, {"wiki_page"})] + ([(entity.result_page, {"wiki_page"})] if entity.result_page else []) + [
+                (ref, {"wiki_candidate"}) for ref in entity.candidates]
+        case WikiCandidate():
+            return [(entity.record, {"paper", "source", "evidence", "claim", "relation", "paper_note"})] + (
+                [(entity.result_page, {"wiki_page"})] if entity.result_page else [])
         case _:
             return []

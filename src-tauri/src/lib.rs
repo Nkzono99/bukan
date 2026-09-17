@@ -778,6 +778,7 @@ pub fn run() {
             persist_codex_paper_list,
             library_change_token,
             research::research_workspace_status,
+            research::research_wiki_request,
             research::prepare_research_environment,
             research::research_records,
             research::research_record,

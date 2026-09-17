@@ -8,10 +8,15 @@ my-research/
 ├── bukan.toml             # ワークスペース設定
 ├── taxonomy.toml          # Paperpileフォルダ・ラベルの分類体系
 ├── AGENTS.md              # 文献調査時のルール
+├── .agents/skills/bukan-paper-review/
+│   ├── SKILL.md           # 作業別の入口
+│   └── references/        # 読解・統合・取得・表示・ツールの詳細
 ├── data/
 │   ├── paperpile.bib      # Paperpile BibTeXなどの読み取り用索引
 │   ├── collections.json   # Workspace独自のコレクションと文献割り当て
 │   ├── research.sqlite    # 研究エンジンの構造化記録（初回利用時に作成）
+│   ├── wiki/              # 研究wikiの改訂出力と固定した参照資料
+│   ├── wiki-assets/       # wikiへ取り込む画像
 │   ├── paper-notes/       # 文献ノートの改訂スナップショットと図表
 │   └── note-assets/       # 永続保存した原図・表のプレビュー
 ├── notes/                 # 文献ノート
@@ -22,6 +27,10 @@ my-research/
 ├── .bukan/                # ViewerとCodexの一時コンテキスト（Git対象外）
 └── cache/                 # 再生成可能な索引・抽出テキスト（Git対象外）
 ```
+
+研究用SKILLは新規ワークスペースへ同梱します。既存のカスタムファイルを上書きせず、
+初期化済みワークスペースを開くだけでは指示文を更新しません。配布元と更新時の比較・保全は
+[研究ハーネスの方針](research-harness.md)を参照してください。
 
 ## Paperpileとの境界
 

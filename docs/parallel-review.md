@@ -115,6 +115,13 @@ support, including the following when relevant:
 Use cached source material rather than repeating extraction. Expand to a new
 full read when errors or the importance of the paper justify it. Resolve each
 finding with a source location and correction or a reason to retain the text.
+Check each proposed Claim's evidence links as well as the Markdown: exact
+substring matching does not show that an excerpt includes the claimed result,
+conditions, or caveat. Use coherent passages, never arbitrary character limits
+that end mid-word. Attach separate method, result, or caption excerpts when
+needed. For linkage-only corrections, the auditor may return an isolated,
+source-checked Write[] proposal; the coordinator validates and saves it while
+preserving the worker's original proposal and the transformation record.
 If a question remains unresolved, qualify the claim and carry the issue into
 the synthesis. Do not silently promote a disputed result into established
 knowledge. Existing notes are comparison candidates, not an answer key.

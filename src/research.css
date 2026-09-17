@@ -36,7 +36,7 @@
 .research-browser { display: grid; grid-template-columns: minmax(230px, .8fr) minmax(0, 2fr); gap: 20px; align-items: start; min-height: 430px; }
 .research-catalog, .research-detail { min-width: 0; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .research-catalog { position: sticky; top: 0; }
-.research-tabs { display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--border); padding: 0 8px; }
+.research-tabs { display: grid; grid-template-columns: .9fr 1fr 1.4fr; border-bottom: 1px solid var(--border); padding: 0 8px; }
 .research-tabs button { padding: 14px 6px 12px; font-size: .75rem; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--text-secondary); cursor: pointer; }
 .research-tabs button[aria-pressed="true"] { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .research-search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px; padding: 12px; border-bottom: 1px solid var(--border); }
@@ -100,6 +100,46 @@
 .research-image { display: block; margin: 1.3em 0; }
 .research-image img { display: block; max-width: 100%; height: auto; margin: 0 auto; background: white; }
 .research-image-status, .research-image-error { display: block; padding: 16px; border: 1px dashed var(--border); background: var(--surface-subtle); color: var(--text-secondary); font-size: .75rem; }
+
+.research-request-context { margin: 0 0 .7em; color: var(--accent); line-height: 1.6; }
+.research-wiki-tools { display: flex; gap: .4rem; flex-wrap: wrap; padding: .65rem; border-bottom: 1px solid var(--border); }
+.research-wiki-tools .research-button { padding: .4rem .55rem; }
+.research-wiki-record { padding-left: calc(1rem + var(--wiki-depth, 0) * .9rem); }
+.research-wiki-intro { color: var(--text-secondary); line-height: 1.9; margin: 1.4rem 0; }
+.research-wiki-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr)); gap: .9rem; }
+.research-wiki-grid > button { text-align: left; padding: 1.2rem; background: var(--surface-subtle); border: 1px solid var(--border); border-radius: .5rem; cursor: pointer; color: inherit; }
+.research-wiki-grid > button:hover { border-color: var(--accent); }
+.research-wiki-grid strong { display: block; font-size: 1rem; line-height: 1.6; margin: .4rem 0; }
+.research-wiki-grid span, .research-wiki-grid small { color: var(--text-secondary); font-size: .7rem; }
+.research-wiki-grid p { line-height: 1.8; }
+.research-wiki-breadcrumb { display: flex; flex-wrap: wrap; gap: .4rem; align-items: center; margin-bottom: 1rem; }
+.research-wiki-breadcrumb > button, .research-wiki-toc > button, .research-wiki-section-status > button { border: 0; background: transparent; color: var(--accent); cursor: pointer; padding: .3rem 0; text-align: left; line-height: 1.6; }
+.research-wiki-breadcrumb .research-button { padding: .3rem .5rem; }
+.research-wiki-aliases, .research-wiki-dates { color: var(--text-secondary); font-size: .72rem; line-height: 1.8; }
+.research-wiki-dates { display: flex; flex-wrap: wrap; gap: .3rem 1rem; padding: .9rem 0; border-bottom: 1px solid var(--border); }
+.research-wiki-toc { display: grid; gap: .2rem; margin: 1.5rem 0; padding: 1rem 1.2rem; border: 1px solid var(--border); border-radius: .4rem; background: var(--surface-subtle); }
+.research-wiki-section { scroll-margin-top: 1.5rem; padding-bottom: .7rem; }
+.research-wiki-section.selected { box-shadow: -.25rem 0 var(--accent); padding-left: 1rem; }
+.research-wiki-section-status { display: flex; align-items: center; justify-content: space-between; gap: .8rem; flex-wrap: wrap; font-size: .7rem; color: var(--text-secondary); }
+.research-wiki-unreviewed { border-left: 2px solid var(--warning); padding: .3rem .8rem; color: var(--text-secondary); font-size: .72rem; }
+.research-wiki-section .research-references { margin-top: 1rem; }
+.research-wiki-related { margin-top: 1.5rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+.research-wiki-links { display: flex; flex-direction: column; align-items: flex-start; gap: .45rem; }
+.research-wiki-links > button { padding: .5rem 0; border: 0; background: transparent; color: var(--accent); cursor: pointer; text-align: left; line-height: 1.6; }
+.research-wiki-links small { padding-left: 1rem; color: var(--text-secondary); }
+.research-wiki-editor { display: grid; gap: .7rem; }
+.research-wiki-editor > label, .research-wiki-editor fieldset > label { font-weight: 600; margin-top: .8rem; }
+.research-wiki-editor input, .research-wiki-editor select, .research-wiki-editor textarea { width: 100%; padding: .6rem .8rem; color: var(--text-primary); background: var(--background); border: 1px solid var(--border); border-radius: .35rem; font-size: inherit; line-height: 1.8; }
+.research-wiki-editor textarea { resize: vertical; }
+.research-wiki-editor fieldset { display: grid; gap: .6rem; margin: .6rem 0; padding: 1rem; min-width: 0; border: 1px solid var(--border); border-radius: .4rem; }
+.research-wiki-editor legend { color: var(--text-secondary); padding: 0 .5rem; }
+.research-wiki-editor .research-note-editor { min-height: 15rem; }
+.research-wiki-editor > .research-button { justify-self: start; }
+.research-wiki-history { display: grid; gap: .7rem; }
+.research-wiki-history > button { display: grid; gap: .5rem; padding: 1rem; border: 1px solid var(--border); border-radius: .4rem; color: inherit; text-align: left; background: var(--surface-subtle); cursor: pointer; line-height: 1.7; }
+.research-wiki-history small { color: var(--text-secondary); }
+.research-wiki-update { padding: 1rem; border: 1px solid var(--border); border-radius: .4rem; margin: .7rem 0; line-height: 1.8; }
+.research-wiki-update > strong { display: block; margin-top: .3rem; }
 
 @container research (max-width: 1050px) {
   .research-overview { grid-template-columns: minmax(0, 1fr); }

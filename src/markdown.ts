@@ -29,6 +29,17 @@ const markdown = new Marked({
   },
   extensions: [
     {
+      name: "wikiSectionAnchor",
+      level: "block",
+      start(src) { return src.indexOf('<a id="'); },
+      tokenizer(src) {
+        const anchor = /^<a id="([a-zA-Z0-9][a-zA-Z0-9_.:-]{0,159})"><\/a>[ \t]*(?:\n|$)/.exec(src);
+        if (anchor?.[1]) return { type: "wikiSectionAnchor", raw: anchor[0], id: anchor[1] };
+        return undefined;
+      },
+      renderer(token) { return `<span data-research-anchor="${escapeHtml(String(token.id))}"></span>`; },
+    },
+    {
       name: "displayMath",
       level: "block",
       start(src) { return src.indexOf("$$"); },
@@ -55,7 +66,7 @@ const markdown = new Marked({
   ],
 });
 
-/** Raw HTML stays visible text. Active links and images are resolved separately by the backend. */
+/** Only inert section anchors become HTML. Links and images are resolved separately by the backend. */
 export function renderResearchMarkdown(text: string): string {
   const html = markdown.parse(text, { async: false });
   return DOMPurify.sanitize(html, { FORBID_TAGS: ["script", "iframe", "object", "embed", "form", "input", "style"], FORBID_ATTR: ["src", "srcset"] });

@@ -52,7 +52,7 @@ def test_durable_idempotent_planning_and_actual_free_capacity(store):
     assert reopened["dispatch_count"] == 0
     assert reopened["ready"] == first["ready"]
     assert store.info()["counts"]["review_task"] == 2
-    assert store.info()["schema_version"] == 1
+    assert store.info()["schema_version"] == 2
     assert plan(store, targets, requested=100, available=1)["dispatch_count"] == 1
 
 

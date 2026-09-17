@@ -20,6 +20,8 @@ def create_server(store: Store) -> FastMCP:
         " Delegate each paper's full review to an independent subagent; use plan_paper_reviews to reuse completed work and queue remaining papers."
         " Audit consequential claims against the exact PDF before synthesis; coverage is not a quality certification."
         " Write display equations with standalone $$ delimiters. Embed important figures and inspect the final export in the target preview."
+        " Wiki pages contain current interpretations; never treat generated wiki prose as original evidence."
+        " Read wiki update tasks and unintegrated candidates before synthesis. Save decisions and checkpoints; completion requires a page revision or a reasoned unchanged outcome."
     ))
 
     @server.tool()
@@ -51,6 +53,34 @@ def create_server(store: Store) -> FastMCP:
     def store_info() -> dict:
         """Report current record counts and format version."""
         return store.info()
+
+    @server.tool()
+    def research_wiki_request(request: dict) -> dict:
+        """Use the version-1 wiki API shared with the desktop.
+
+        Read: operation wiki-status, wiki-home(query/pageType/category/offset/limit),
+        get(id/revision). Write: migrate (explicit SQLite backup), wiki-refresh,
+        create-wiki(title/pageType/parentId), save-wiki(id/expectedRevision/title/summary/
+        sections[{id,title,markdown}]/changeReason), create-wiki-task(pageId/pageRevision/sectionId/purpose),
+        update-wiki-task(id/expectedRevision/state/worker/checkpoint/reason/outcome/resultPageRevision),
+        decide-wiki-candidate(id/expectedRevision/state/pageId/reason/resultPageRevision).
+        pageRevision pins the viewed task input. Completing a task or integrating a
+        candidate requires resultPageRevision, the explicitly compared current page.
+        Full structured basis and metadata edits use put_records with kind wiki_page.
+        Navigation uses current page IDs; basis always pins a record revision.
+        """
+        from .desktop import handle_request
+        return handle_request(store, request, author="ai-client")
+
+    @server.tool()
+    def export_wiki_page(record_id: str, revision: int | None = None) -> dict:
+        """Export a pinned wiki revision and its immutable child image assets.
+
+        Author local images relative to data/wiki/<page hash>.md using ../wiki-assets/.
+        Images are frozen in SQLite with each revision. Local export edits are preserved.
+        """
+        from .wiki import export_wiki
+        return export_wiki(store, record_id, revision)
 
     @server.tool()
     def get_paper_note(record_id: str, revision: int | None = None) -> dict:

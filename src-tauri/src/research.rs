@@ -251,6 +251,15 @@ async fn engine_request(
 }
 
 #[tauri::command]
+pub async fn research_wiki_request(
+    app: AppHandle,
+    workspace_root: String,
+    request: Value,
+) -> Result<Value, String> {
+    engine_request(app, workspace_root, request).await
+}
+
+#[tauri::command]
 pub async fn research_records(
     app: AppHandle,
     workspace_root: String,
@@ -361,11 +370,12 @@ fn local_link_path(root: &Path, document: &Path, href: &str) -> Result<(PathBuf,
         checked_file(root, &candidate)?
     } else {
         let base = research_runtime::resolve_destination(&candidate)?;
-        if !base.starts_with(root.join("data/paper-notes"))
+        if !(base.starts_with(root.join("data/paper-notes"))
+            || base.starts_with(root.join("data/wiki")))
             || extension(&base) != "md"
             || is_protected(&base)
         {
-            return Err("画像の参照元には文献ノートの保存先を指定してください".into());
+            return Err("画像の参照元には文献ノートまたはwikiの保存先を指定してください".into());
         }
         base
     };
@@ -524,6 +534,9 @@ fn save_request(
     record_id: Option<&str>,
     revision: Option<u32>,
     document_path: Option<&str>,
+    section_id: Option<&str>,
+    section_title: Option<&str>,
+    task_id: Option<&str>,
 ) -> Result<Value, String> {
     let text = text.trim();
     if text.is_empty() || text.len() > 50_000 {
@@ -532,7 +545,7 @@ fn save_request(
     let document = document_path
         .map(|path| checked_file(root, Path::new(path)))
         .transpose()?;
-    let request = json!({"formatVersion":1, "text":text, "recordId":record_id, "recordRevision":revision, "documentPath":document});
+    let request = json!({"formatVersion":1, "text":text, "recordId":record_id, "recordRevision":revision, "documentPath":document, "sectionId":section_id, "sectionTitle":section_title, "taskId":task_id});
     let stamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| e.to_string())?
@@ -542,10 +555,16 @@ fn save_request(
         &PathBuf::from("queries/requests").join(format!("{stamp}.md")),
     )?;
     fs::create_dir_all(archive.parent().unwrap()).map_err(|e| e.to_string())?;
-    let context = format!("# Bukanの研究依頼\n\n{text}\n\n## 対象と作業先\n\n- Workspace: `{}`\n- Research store: `{}`\n- Record: {}\n- Document: {}\n\nこの依頼は保存済みです。実行はCodexの対話で依頼された時に開始してください。\nBukan MCPと研究MCPを使い、保存済みの根拠・未処理作業を確認して続行してください。\nAGENTS.mdの全文読解・並列レビュー・引用の外まで探索する手順を守り、結果と残件を同じワークスペースへ保存してください。\nPaperpile原本は読み取り専用です。\n",
+    let context = format!("# Bukanの研究依頼\n\n{text}\n\n## 対象と作業先\n\n- Workspace: `{}`\n- Research store: `{}`\n- Record: {}\n- Document: {}\n- Section: {}\n\nこの依頼は保存済みです。実行はCodexの対話で依頼された時に開始してください。\n作業範囲は上の依頼に合わせ、AGENTS.mdと該当するbukan-paper-reviewスキルの手順を参照してください。\n更新前に対象の現在版と保存済みの根拠を確認し、結果・採用した訂正・残件を同じワークスペースへ保存してください。wikiに関わる依頼は対象ページ・節にも反映し、変更不要なら理由を記録してください。\nPaperpile原本は読み取り専用です。\n",
         root.display(), research_runtime::store_path(root)?.display(),
         record_id.map(|id| format!("`{id}@{}`", revision.map(|r| r.to_string()).unwrap_or_else(|| "latest".into()))).unwrap_or_else(|| "未指定".into()),
-        document.as_ref().map(|p| format!("`{}`", p.display())).unwrap_or_else(|| "未指定".into()));
+        document.as_ref().map(|p| format!("`{}`", p.display())).unwrap_or_else(|| "未指定".into()),
+        section_id.map(|id| format!("`{id}` {}", section_title.unwrap_or_default())).unwrap_or_else(|| "未指定".into()));
+    let context = if let Some(task_id) = task_id {
+        format!("{context}\n## 保存済みのwiki作業\n\n`{task_id}`の現在版と状態を取得し、その改訂を指定して同じ作業記録を更新してください。完了時は対象ページの改訂、または変更不要の理由と残件を記録してください。\n")
+    } else {
+        context
+    };
     fs::write(&archive, &context).map_err(|e| e.to_string())?;
     let current = output_path(root, Path::new(".bukan/current-research.md"))?;
     let current_json = output_path(root, Path::new(".bukan/current-research.json"))?;
@@ -562,6 +581,9 @@ pub fn save_research_request(
     record_id: Option<String>,
     record_revision: Option<u32>,
     document_path: Option<String>,
+    section_id: Option<String>,
+    section_title: Option<String>,
+    task_id: Option<String>,
 ) -> Result<Value, String> {
     let root = checked_workspace(Path::new(&workspace_root))?;
     save_request(
@@ -570,6 +592,9 @@ pub fn save_research_request(
         record_id.as_deref(),
         record_revision,
         document_path.as_deref(),
+        section_id.as_deref(),
+        section_title.as_deref(),
+        task_id.as_deref(),
     )
 }
 
@@ -677,6 +702,13 @@ mod tests {
         )
         .unwrap();
         assert_eq!(image, root.join("data/note-assets/paper/figure.png"));
+        let (image, _) = local_link_path(
+            &root,
+            &root.join("data/wiki/page/r1.md"),
+            "../../note-assets/paper/figure.png",
+        )
+        .unwrap();
+        assert_eq!(image, root.join("data/note-assets/paper/figure.png"));
         assert!(local_link_path(
             &root,
             &root.join("cache/missing.md"),
@@ -688,11 +720,83 @@ mod tests {
     #[test]
     fn requests_are_saved_in_workspace_and_references_are_checked() {
         let (_temporary, root) = fixture();
-        let saved =
-            save_request(&root, "ダスト輸送の対立する主張を検証", None, None, None).unwrap();
-        assert!(Path::new(saved["path"].as_str().unwrap()).is_file());
+        let saved = save_request(
+            &root,
+            "ダスト輸送の対立する主張を検証",
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+        let first_archive = Path::new(saved["path"].as_str().unwrap());
+        assert!(first_archive.is_file());
         let current = fs::read_to_string(root.join(".bukan/current-research.md")).unwrap();
+        assert_eq!(fs::read_to_string(first_archive).unwrap(), current);
         assert!(current.contains("data") && current.contains("research.sqlite"));
-        assert!(save_request(&root, "check", None, None, Some("../outside.md")).is_err());
+        assert!(current.contains("実行はCodexの対話で依頼された時に開始"));
+        assert!(current.contains("bukan-paper-review"));
+        assert!(current.contains("Paperpile原本は読み取り専用"));
+        assert!(save_request(
+            &root,
+            "check",
+            None,
+            None,
+            Some("../outside.md"),
+            None,
+            None,
+            None
+        )
+        .is_err());
+        let second = save_request(
+            &root,
+            "離脱条件を再調査",
+            Some("wiki-detachment"),
+            Some(3),
+            None,
+            Some("uv"),
+            Some("UV照射の条件"),
+            Some("wiki-task-uv"),
+        )
+        .unwrap();
+        assert_eq!(fs::read_to_string(first_archive).unwrap(), current);
+        let request: Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".bukan/current-research.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(request["formatVersion"], 1);
+        assert_eq!(request["text"], "離脱条件を再調査");
+        assert_eq!(request["recordId"], "wiki-detachment");
+        assert!(request["documentPath"].is_null());
+        assert_eq!(request["sectionId"], "uv");
+        assert_eq!(request["sectionTitle"], "UV照射の条件");
+        assert_eq!(request["recordRevision"], 3);
+        assert_eq!(request["taskId"], "wiki-task-uv");
+        let current = fs::read_to_string(root.join(".bukan/current-research.md")).unwrap();
+        assert_eq!(
+            fs::read_to_string(second["path"].as_str().unwrap()).unwrap(),
+            current
+        );
+        assert!(current.contains("UV照射の条件") && current.contains("wiki-detachment@3"));
+        assert!(current.contains("wiki-task-uv"));
+        assert!(current.contains("その改訂を指定"));
+    }
+
+    #[test]
+    fn scoped_requests_do_not_add_a_full_research_recipe() {
+        let (_temporary, root) = fixture();
+        for text in ["図のプレビューだけを直して", "この節の意味を説明して"]
+        {
+            save_request(&root, text, None, None, None, None, None, None).unwrap();
+            let current = fs::read_to_string(root.join(".bukan/current-research.md")).unwrap();
+            assert!(current.contains(text));
+            assert!(current.contains("作業範囲は上の依頼に合わせ"));
+            assert!(!current.contains("全文読解"));
+            assert!(!current.contains("並列レビュー"));
+            assert!(!current.contains("未統合資料も検索"));
+            assert!(!current.contains("保存済みのwiki作業"));
+        }
     }
 }

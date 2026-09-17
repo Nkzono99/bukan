@@ -14,3 +14,6 @@ workspace templates. It does not contain a user's literature notes or Paperpile 
 
 The `templates/workspace/AGENTS.md` file contains instructions copied into newly
 initialized research workspaces. Do not mix those instructions with this file.
+
+For research instructions, bundled skills, or Codex request handoffs, use
+[the harness guide](docs/research-harness.md) to find the owning files and checks.

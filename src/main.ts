@@ -667,7 +667,7 @@ function sidebarTemplate(): string {
   const library = state.library;
   if (!library) return `<aside class="sidebar">
     <div class="sidebar-header"><strong>${escapeHtml(state.workspaceName ?? "研究")}</strong></div>
-    <nav class="primary-nav"><button class="nav-item active" data-rail-action="research">研究ホーム</button>
+    <nav class="primary-nav"><button class="nav-item active" data-rail-action="research">研究wiki</button>
       <p class="offline-library-note">Paperpileが未接続でも、保存済みの研究を利用できます。</p></nav>
     <div class="sidebar-footer"><div class="workspace-footer-actions">
       <button class="open-workspace" type="button">研究を開く</button>
@@ -680,7 +680,7 @@ function sidebarTemplate(): string {
   return `<aside class="sidebar" aria-label="コレクション">
     <div class="sidebar-header"><span><strong>${escapeHtml(state.workspaceName ?? "文献プレビュー")}</strong><small>${library.stats.paperCount} papers</small></span><button class="sidebar-close" type="button" title="サイドバーを格納" aria-label="サイドバーを格納">${icons.panel}</button></div>
     <nav class="primary-nav" aria-label="ライブラリ">
-      <button class="nav-item ${state.mode === "research" ? "active" : ""}" data-rail-action="research"><span>${icons.review}研究ホーム</span></button>
+      <button class="nav-item ${state.mode === "research" ? "active" : ""}" data-rail-action="research"><span>${icons.review}研究wiki</span></button>
       <p class="nav-label">ライブラリ</p>
       <button class="nav-item ${state.mode === "library" && !state.collection && !state.starredOnly ? "active" : ""}" data-view="all">
         <span>${icons.library}すべての文献</span><em>${library.stats.paperCount}</em>
@@ -720,7 +720,7 @@ function railTemplate(): string {
   return `<aside class="app-rail" aria-label="アプリナビゲーション">
     <button class="rail-brand" type="button" data-rail-action="sidebar" title="コレクションを開閉" aria-label="コレクションを開閉">B</button>
     <nav class="rail-nav">
-      <button class="rail-button ${state.mode === "research" ? "active" : ""}" type="button" data-rail-action="research" title="研究ホーム" aria-label="研究ホーム">${icons.review}</button>
+      <button class="rail-button ${state.mode === "research" ? "active" : ""}" type="button" data-rail-action="research" title="研究wiki" aria-label="研究wiki">${icons.review}</button>
       <button class="rail-button ${state.mode === "library" ? "active" : ""}" type="button" data-rail-action="library" title="ライブラリ" aria-label="ライブラリ">${icons.library}</button>
       <button class="rail-button" type="button" data-rail-action="search" title="検索（/）" aria-label="検索">${icons.search}</button>
       <button class="rail-button ${state.mode === "reviews" ? "active" : ""}" type="button" data-rail-action="reviews" title="継続レビュー" aria-label="継続レビュー">${icons.review}</button>
@@ -736,7 +736,7 @@ function railTemplate(): string {
 function commandPaletteTemplate(): string {
   if (!state.commandOpen) return "";
   const commands = [
-    ["research", icons.review, "研究ホームを開く", "研究"],
+    ["research", icons.review, "研究wikiを開く", "研究"],
     ["open-workspace", icons.folder, "研究ワークスペースを開く", "研究"],
     ["create-workspace", icons.folder, "新しい研究を始める", "研究"],
     ["search", icons.search, "論文を検索", "現在のライブラリ"],
@@ -1075,7 +1075,7 @@ function reviewsTemplate(): string {
 
 function workspaceTemplate(): string {
   const papers = filteredPapers();
-  const currentTitle = state.mode === "research" ? "研究ホーム" : state.mode === "reviews"
+  const currentTitle = state.mode === "research" ? "研究wiki" : state.mode === "reviews"
     ? state.activeReview?.title ?? "継続レビュー"
     : state.collection ?? (state.starredOnly ? "Starred Papers" : "All Papers");
   return `<div class="workspace ${state.sidebarCollapsed ? "sidebar-collapsed" : ""}" style="--sidebar-width:${state.sidebarWidth}px;--paper-list-width:${state.paperListWidth}px">

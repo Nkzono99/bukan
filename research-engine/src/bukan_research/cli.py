@@ -14,12 +14,19 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init")
     commands.add_parser("info")
+    commands.add_parser("migrate", help="Back up format 1 before upgrading the research store")
+    commands.add_parser("wiki-status")
+    commands.add_parser("wiki-home")
+    commands.add_parser("wiki-refresh", help="Refresh durable wiki integration candidates and stale-section tasks")
     commands.add_parser("export")
     commands.add_parser("serve")
     commands.add_parser("desktop", help="Read one versioned desktop JSON request from stdin")
     note = commands.add_parser("export-note")
     note.add_argument("id")
     note.add_argument("--revision", type=int)
+    wiki = commands.add_parser("export-wiki")
+    wiki.add_argument("id")
+    wiki.add_argument("--revision", type=int)
     put = commands.add_parser("put")
     put.add_argument("file", type=Path)
     put.add_argument("--author", default="cli-user")
@@ -41,6 +48,16 @@ def main():
                 result = store.initialize()
             case "info":
                 result = store.info()
+            case "migrate":
+                result = store.migrate()
+            case "wiki-status":
+                result = store.status()
+            case "wiki-home" | "wiki-refresh":
+                from .desktop import handle_request
+                result = handle_request(store, {"operation": args.command})
+            case "export-wiki":
+                from .wiki import export_wiki
+                result = export_wiki(store, args.id, args.revision)
             case "export":
                 result = store.export()
             case "desktop":

@@ -9,9 +9,64 @@ use crate::{detect_paperpile_roots, normalize_library_root};
 
 pub const WORKSPACE_VERSION: u32 = 1;
 
-const AGENTS_TEMPLATE: &str = include_str!("../../templates/workspace/AGENTS.md");
-const TAXONOMY_TEMPLATE: &str = include_str!("../../templates/workspace/taxonomy.toml");
-const GITIGNORE_TEMPLATE: &str = include_str!("../../templates/workspace/.gitignore");
+const WORKSPACE_DIRECTORIES: &[&str] = &[
+    "data",
+    "notes",
+    "queries",
+    "candidates",
+    "reports",
+    "imports",
+    "cache",
+    ".agents/skills/bukan-paper-review/references",
+];
+const WORKSPACE_TEMPLATES: &[(&str, &str)] = &[
+    (
+        "AGENTS.md",
+        include_str!("../../templates/workspace/AGENTS.md"),
+    ),
+    (
+        "taxonomy.toml",
+        include_str!("../../templates/workspace/taxonomy.toml"),
+    ),
+    (
+        ".gitignore",
+        include_str!("../../templates/workspace/.gitignore"),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/SKILL.md",
+        include_str!("../../templates/workspace/.agents/skills/bukan-paper-review/SKILL.md"),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/references/full-review.md",
+        include_str!(
+            "../../templates/workspace/.agents/skills/bukan-paper-review/references/full-review.md"
+        ),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/references/synthesis.md",
+        include_str!(
+            "../../templates/workspace/.agents/skills/bukan-paper-review/references/synthesis.md"
+        ),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/references/acquisition.md",
+        include_str!(
+            "../../templates/workspace/.agents/skills/bukan-paper-review/references/acquisition.md"
+        ),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/references/preview.md",
+        include_str!(
+            "../../templates/workspace/.agents/skills/bukan-paper-review/references/preview.md"
+        ),
+    ),
+    (
+        ".agents/skills/bukan-paper-review/references/tools.md",
+        include_str!(
+            "../../templates/workspace/.agents/skills/bukan-paper-review/references/tools.md"
+        ),
+    ),
+];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WorkspaceConfig {
@@ -57,26 +112,12 @@ pub fn init_workspace(
     };
     let destination = crate::research_runtime::resolve_destination(&absolute)?;
     crate::research_runtime::validate_storage_location(&destination)?;
+    let root = destination.as_path();
     if root.join("bukan.toml").exists() {
         return Err("このフォルダはすでにBukanワークスペースです".to_string());
     }
 
-    fs::create_dir_all(root)
-        .map_err(|error| format!("ワークスペースを作成できませんでした: {error}"))?;
-    for directory in [
-        "data",
-        "notes",
-        "queries",
-        "candidates",
-        "reports",
-        "imports",
-        "cache",
-    ] {
-        fs::create_dir_all(root.join(directory))
-            .map_err(|error| format!("{directory} を作成できませんでした: {error}"))?;
-    }
-
-    let default_name = root
+    let default_name = absolute
         .file_name()
         .map(|value| value.to_string_lossy().into_owned())
         .filter(|value| !value.trim().is_empty())
@@ -97,10 +138,49 @@ pub fn init_workspace(
     };
     let config_text = toml::to_string_pretty(&config)
         .map_err(|error| format!("ワークスペース設定を生成できませんでした: {error}"))?;
+
+    let paperpile = paperpile_path
+        .filter(|path| !path.eq_ignore_ascii_case("auto"))
+        .and_then(|path| crate::research_runtime::resolve_destination(&root.join(path)).ok());
+    // Check every destination before creating anything, including nested links.
+    for (relative, directory) in WORKSPACE_DIRECTORIES
+        .iter()
+        .map(|path| (*path, true))
+        .chain(WORKSPACE_TEMPLATES.iter().map(|(path, _)| (*path, false)))
+        .chain(std::iter::once(("bukan.toml", false)))
+    {
+        let path = crate::research_runtime::resolve_destination(&root.join(relative))?;
+        if !path.starts_with(root) {
+            return Err("初期化するファイルの保存先はワークスペース内にしてください".into());
+        }
+        crate::research_runtime::validate_storage_location(&path)?;
+        if paperpile
+            .as_ref()
+            .is_some_and(|source| path.starts_with(source))
+        {
+            return Err("Paperpile内にはワークスペースを作成できません".into());
+        }
+        if path.exists()
+            && !(if directory {
+                path.is_dir()
+            } else {
+                path.is_file()
+            })
+        {
+            return Err(format!("{relative} に異なる種類のファイルが存在します"));
+        }
+    }
+
+    fs::create_dir_all(root)
+        .map_err(|error| format!("ワークスペースを作成できませんでした: {error}"))?;
+    for directory in WORKSPACE_DIRECTORIES {
+        fs::create_dir_all(root.join(directory))
+            .map_err(|error| format!("{directory} を作成できませんでした: {error}"))?;
+    }
+    for (relative, contents) in WORKSPACE_TEMPLATES {
+        write_if_absent(&root.join(relative), contents)?;
+    }
     write_new(&root.join("bukan.toml"), &config_text)?;
-    write_if_absent(&root.join("taxonomy.toml"), TAXONOMY_TEMPLATE)?;
-    write_if_absent(&root.join("AGENTS.md"), AGENTS_TEMPLATE)?;
-    write_if_absent(&root.join(".gitignore"), GITIGNORE_TEMPLATE)?;
 
     describe_workspace(root)
 }
@@ -192,16 +272,137 @@ mod tests {
         assert!(root.join("taxonomy.toml").is_file());
         assert!(root.join("notes").is_dir());
         assert!(root.join("cache").is_dir());
+        for (relative, contents) in WORKSPACE_TEMPLATES {
+            assert_eq!(fs::read_to_string(root.join(relative)).unwrap(), *contents);
+        }
         let (_, config) = load_workspace(&root).expect("load workspace");
         assert!(config.paperpile.read_only);
+    }
+
+    #[test]
+    fn preserves_custom_instructions_and_research_when_initializing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("workspace");
+        let custom_files = [
+            "AGENTS.md",
+            ".gitignore",
+            "taxonomy.toml",
+            ".agents/skills/bukan-paper-review/SKILL.md",
+            ".agents/skills/bukan-paper-review/references/full-review.md",
+            "notes/custom.md",
+        ];
+        for relative in custom_files {
+            let path = root.join(relative);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, format!("custom: {relative}")).unwrap();
+        }
+        init_workspace(&root, None, None).unwrap();
+        for relative in custom_files {
+            assert_eq!(
+                fs::read_to_string(root.join(relative)).unwrap(),
+                format!("custom: {relative}")
+            );
+        }
+        assert!(root
+            .join(".agents/skills/bukan-paper-review/references/synthesis.md")
+            .is_file());
     }
 
     #[test]
     fn refuses_to_overwrite_existing_workspace() {
         let temporary = tempfile::tempdir().expect("tempdir");
         init_workspace(temporary.path(), None, None).expect("first init");
+        let skill = temporary
+            .path()
+            .join(".agents/skills/bukan-paper-review/SKILL.md");
+        fs::remove_file(&skill).unwrap();
+        fs::write(temporary.path().join("AGENTS.md"), "custom instructions").unwrap();
+        let config = fs::read(temporary.path().join("bukan.toml")).unwrap();
+        describe_workspace(temporary.path()).unwrap();
         let error = init_workspace(temporary.path(), None, None).expect_err("second init fails");
         assert!(error.contains("すでに"));
+        assert!(!skill.exists());
+        assert_eq!(
+            fs::read(temporary.path().join("bukan.toml")).unwrap(),
+            config
+        );
+        assert_eq!(
+            fs::read_to_string(temporary.path().join("AGENTS.md")).unwrap(),
+            "custom instructions"
+        );
+    }
+
+    #[cfg(any(unix, windows))]
+    fn link_directory(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            let output = std::process::Command::new("cmd")
+                .args(["/C", "mklink", "/J"])
+                .arg(link.to_string_lossy().replace('/', "\\"))
+                .arg(target.to_string_lossy().replace('/', "\\"))
+                .creation_flags(0x0800_0000)
+                .output()
+                .unwrap();
+            assert!(output.status.success(), "{output:?}");
+        }
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn refuses_linked_directories_outside_workspace_before_writing() {
+        for relative in [
+            ".agents",
+            ".agents/skills/bukan-paper-review/references",
+            "data",
+        ] {
+            let temporary = tempfile::tempdir().unwrap();
+            let root = temporary.path().join("workspace");
+            let outside = temporary.path().join("outside");
+            fs::create_dir_all(&outside).unwrap();
+            fs::write(outside.join("keep.md"), "original").unwrap();
+            let link = root.join(relative);
+            fs::create_dir_all(link.parent().unwrap()).unwrap();
+            link_directory(&outside, &link);
+
+            assert!(init_workspace(&root, None, None).is_err());
+            assert!(!root.join("bukan.toml").exists());
+            assert!(!root.join("AGENTS.md").exists());
+            assert_eq!(fs::read_dir(&outside).unwrap().count(), 1);
+            assert_eq!(
+                fs::read_to_string(outside.join("keep.md")).unwrap(),
+                "original"
+            );
+        }
+    }
+
+    #[test]
+    #[cfg(any(unix, windows))]
+    fn refuses_nested_links_into_configured_paperpile() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("workspace");
+        let source = root.join("synced-library");
+        fs::create_dir_all(&source).unwrap();
+        let link = root.join(".agents/skills/bukan-paper-review/references");
+        fs::create_dir_all(link.parent().unwrap()).unwrap();
+        link_directory(&source, &link);
+
+        let error = init_workspace(&root, None, Some("synced-library")).unwrap_err();
+        assert!(error.contains("Paperpile"));
+        assert!(!root.join("bukan.toml").exists());
+        assert_eq!(fs::read_dir(&source).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn rejects_conflicting_skill_path_before_writing() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("workspace");
+        fs::create_dir_all(root.join(".agents/skills/bukan-paper-review/SKILL.md")).unwrap();
+        assert!(init_workspace(&root, None, None).is_err());
+        assert!(!root.join("bukan.toml").exists());
+        assert!(!root.join("data").exists());
     }
 
     #[test]

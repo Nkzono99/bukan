@@ -1,16 +1,25 @@
 """Append-only SQLite revisions and exact source-span checks, with atomic batches."""
 
 from collections import deque
-from contextlib import contextmanager
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 import sqlite3
 
-from .models import ENTITY, Evidence, Relation, ReviewTask, Source, Write, references
+from .models import ENTITY, Evidence, Relation, ReviewTask, Source, WikiPage, WikiTask, WikiCandidate, Write, references
 
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
+
+
+def _install_writer_guards(db):
+    # Version-1 clients may have passed their format check before migration took
+    # the writer lock. Triggers also block these already-open legacy connections.
+    for table in ("records", "heads", "links", "wiki_snapshots", "wiki_assets", "wiki_documents"):
+        for operation in ("INSERT", "UPDATE", "DELETE"):
+            db.execute(f"CREATE TRIGGER {table}_v2_{operation.lower()} BEFORE {operation} ON {table} "
+                       "BEGIN SELECT CASE WHEN bukan_writer_version() != 2 THEN RAISE(ABORT, 'Unsupported research writer format') END; END")
 
 
 def validate_store_path(path: Path) -> Path:
@@ -35,10 +44,14 @@ class Store:
             raise ValueError("Store not initialized; run bukan-research --store PATH init.")
         db = sqlite3.connect(self.path, timeout=10)
         db.row_factory = sqlite3.Row
+        db.create_function("bukan_writer_version", 0, lambda: FORMAT_VERSION)
         db.execute("PRAGMA foreign_keys = ON")
         try:
-            if db.execute("PRAGMA user_version").fetchone()[0] != FORMAT_VERSION:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version not in {1, FORMAT_VERSION}:
                 raise ValueError("Unsupported research store format.")
+            if write and version != FORMAT_VERSION:
+                raise ValueError("Research store format 1 is read-only; run migrate to back up and upgrade to format 2.")
             with db:
                 db.execute("BEGIN IMMEDIATE" if write else "BEGIN")
                 yield db
@@ -73,12 +86,60 @@ class Store:
                     FOREIGN KEY(target_id, target_revision) REFERENCES records(id, revision)
                 );
                 CREATE INDEX links_target ON links(target_id, target_revision);
-                PRAGMA user_version = 1;
+                CREATE TABLE wiki_snapshots (id TEXT NOT NULL, revision INTEGER NOT NULL, markdown TEXT NOT NULL,
+                    PRIMARY KEY(id,revision), FOREIGN KEY(id,revision) REFERENCES records(id,revision));
+                CREATE TABLE wiki_assets (id TEXT NOT NULL, revision INTEGER NOT NULL, name TEXT NOT NULL, content BLOB NOT NULL,
+                    PRIMARY KEY(id,revision,name), FOREIGN KEY(id,revision) REFERENCES records(id,revision));
+                CREATE TABLE wiki_documents (id TEXT NOT NULL, revision INTEGER NOT NULL, target_id TEXT NOT NULL,
+                    target_revision INTEGER NOT NULL, markdown TEXT NOT NULL, PRIMARY KEY(id,revision,target_id,target_revision),
+                    FOREIGN KEY(id,revision) REFERENCES records(id,revision));
+                PRAGMA user_version = 2;
                 COMMIT;
             """)
+            _install_writer_guards(db)
+            db.commit()
         finally:
             db.close()
         return self.info()
+
+    def status(self):
+        if not self.path.is_file():
+            return {"formatVersion": None, "needsMigration": False, "initialized": False}
+        with closing(sqlite3.connect(f"{self.path.as_uri()}?mode=ro", uri=True)) as db:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+        if version not in {1, FORMAT_VERSION}:
+            raise ValueError("Unsupported research store format.")
+        return {"formatVersion": version, "needsMigration": version == 1, "initialized": True}
+
+    def migrate(self):
+        """Back up a consistent SQLite snapshot before the explicit format upgrade."""
+        status = self.status()
+        if not status["initialized"]:
+            self.initialize()
+            return self.status()
+        if not status["needsMigration"]:
+            return status
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        backup = validate_store_path(self.path.parent / "backups" / f"{self.path.stem}-v1-{stamp}.sqlite")
+        backup.parent.mkdir(parents=True, exist_ok=True)
+        with backup.open("xb"):
+            pass
+        with closing(sqlite3.connect(self.path, timeout=10)) as db, db:
+            # Hold a reserved writer lock while a separate reader takes the backup.
+            # The backup API includes committed WAL pages and excludes partial writes.
+            db.execute("BEGIN IMMEDIATE")
+            if db.execute("PRAGMA user_version").fetchone()[0] != 1:
+                raise ValueError("Store format changed while migrating; reopen its status.")
+            with closing(sqlite3.connect(self.path)) as source, closing(sqlite3.connect(backup)) as target:
+                source.backup(target)
+                if target.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                    raise ValueError("Migration backup integrity check failed.")
+            db.execute("PRAGMA user_version = 2")
+            db.execute("CREATE TABLE wiki_snapshots (id TEXT NOT NULL, revision INTEGER NOT NULL, markdown TEXT NOT NULL, PRIMARY KEY(id,revision), FOREIGN KEY(id,revision) REFERENCES records(id,revision))")
+            db.execute("CREATE TABLE wiki_assets (id TEXT NOT NULL, revision INTEGER NOT NULL, name TEXT NOT NULL, content BLOB NOT NULL, PRIMARY KEY(id,revision,name), FOREIGN KEY(id,revision) REFERENCES records(id,revision))")
+            db.execute("CREATE TABLE wiki_documents (id TEXT NOT NULL, revision INTEGER NOT NULL, target_id TEXT NOT NULL, target_revision INTEGER NOT NULL, markdown TEXT NOT NULL, PRIMARY KEY(id,revision,target_id,target_revision), FOREIGN KEY(id,revision) REFERENCES records(id,revision))")
+            _install_writer_guards(db)
+        return {**self.status(), "backupPath": str(backup)}
 
     @staticmethod
     def _get(db, record_id, revision=None):
@@ -111,6 +172,13 @@ class Store:
                 head = db.execute("SELECT revision FROM heads WHERE id=?", (entity.id,)).fetchone()
                 revision = head[0] if head else 0
                 old = self._get(db, entity.id) if head else None
+                if isinstance(entity, (WikiPage, WikiTask, WikiCandidate)) and item.expected_revision != revision:
+                    raise ValueError(f"Revision conflict: {entity.id}; expected {item.expected_revision}, current {revision}")
+                if isinstance(entity, WikiPage):
+                    from .wiki import prepare_page
+                    entity = prepare_page(entity, ENTITY.validate_json(old["body"]) if old else None)
+                    body = json.dumps(entity.model_dump(), ensure_ascii=False, sort_keys=True)
+                    digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
                 if old and old["digest"] == digest:
                     if isinstance(entity, ReviewTask):
                         unchanged_tasks.append(entity)
@@ -146,6 +214,9 @@ class Store:
                         raise ValueError("An extends relation must state what was retained and changed.")
                 if isinstance(entity, ReviewTask):
                     self._validate_review_task(db, entity, previous[entity.id], pending, resolve)
+                if isinstance(entity, (WikiPage, WikiTask, WikiCandidate)):
+                    from .wiki import validate_wiki_entity
+                    validate_wiki_entity(entity, resolve, db, pending)
             for task in unchanged_tasks:
                 self._validate_review_task(db, task, task, pending, resolve, replay=True)
 
@@ -159,6 +230,13 @@ class Store:
                 for ref, _ in references(entity):
                     db.execute("INSERT OR IGNORE INTO links VALUES (?,?,?,?)",
                                (record_id, revision, ref.id, ref.revision))
+                if isinstance(entity, WikiPage):
+                    from .wiki import snapshot_page
+                    snapshot_page(self, db, entity, revision)
+            if any(entity.kind in {"paper", "source", "evidence", "claim", "relation", "question", "topic", "paper_note", "wiki_page"}
+                   for entity, _, _ in pending.values()):
+                from .wiki import sync_work
+                sync_work(db, now)
             return results
 
     def _validate_review_task(self, db, task, old, pending, resolve, *, replay=False):
@@ -288,12 +366,12 @@ class Store:
         with self.connect() as db:
             counts = dict(db.execute("SELECT r.kind,count(*) FROM records r JOIN heads h "
                                      "ON r.id=h.id AND r.revision=h.revision GROUP BY r.kind").fetchall())
-            return {"schema_version": FORMAT_VERSION, "counts": counts,
+            return {"schema_version": db.execute("PRAGMA user_version").fetchone()[0], "counts": counts,
                     "revisions": db.execute("SELECT count(*) FROM records").fetchone()[0]}
 
     def export(self):
         with self.connect() as db:
-            return {"schema_version": FORMAT_VERSION,
+            return {"schema_version": db.execute("PRAGMA user_version").fetchone()[0],
                     "records": [self._decode(row) for row in db.execute(
                         "SELECT * FROM records ORDER BY id,revision")],
                     "heads": dict(db.execute("SELECT id,revision FROM heads").fetchall())}

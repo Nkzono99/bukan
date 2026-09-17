@@ -54,3 +54,35 @@ def test_real_stdio_server_registers_reopens_and_rejects_bad_reference(tmp_path)
 
     asyncio.run(run())
     assert Store(path).info()["counts"] == {"paper": 1, "source": 1, "paper_note": 1}
+
+
+def test_wiki_stdio_api_preserves_author_and_revision_contract(tmp_path):
+    path = tmp_path / "research.sqlite"
+    Store(path).initialize()
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable,
+            args=["-m", "bukan_research.cli", "--store", str(path), "serve"],
+            env={**os.environ, "PYTHONUTF8": "1"})
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                names = {tool.name for tool in (await client.list_tools()).tools}
+                assert {"research_wiki_request", "export_wiki_page"} <= names
+                created = await client.call_tool("research_wiki_request", {"request": {
+                    "operation": "create-wiki", "title": "照射と離脱", "pageType": "concept"}})
+                assert not created.isError
+                data = json.loads(created.content[0].text)
+                identifier = data["id"]
+                assert Store(path).get(identifier)["author"] == "ai-client"
+                updated = await client.call_tool("research_wiki_request", {"request": {
+                    "operation": "save-wiki", "id": identifier, "expectedRevision": 1,
+                    "title": "照射と離脱", "summary": "条件を限定して検証する。", "sections": [
+                        {"id": "conditions", "title": "対象条件", "markdown": "接触状態を未確認として残す。"}]}})
+                assert not updated.isError
+                exported = await client.call_tool("export_wiki_page", {"record_id": identifier, "revision": 1})
+                assert not exported.isError
+                assert json.loads(exported.content[0].text)["revision"] == 1
+                assert len(Store(path).history(identifier)) == 2
+
+    asyncio.run(run())

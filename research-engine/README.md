@@ -48,6 +48,14 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 | `summary` | 任意の`query`、`kind`、`offset`、`limit`（既定50、最大200） | 件数、現在のレコードの一覧、`hasMore`と`nextOffset`。検索は保存内容全体の部分一致 |
 | `get` | `id`、任意の`revision` | 省略しない本文のMarkdown、固定した改訂への参照、文献ノートのプレビュー出力先と編集用本文 |
 | `save-note` | `id`、`expectedRevision`、`markdown` | 新しい文献ノート改訂の`get`と同じ結果。競合時は保存しない |
+| `wiki-status` / `migrate` | 追加引数なし | 保存形式を確認／SQLiteバックアップを作成して形式1から2へ移行 |
+| `wiki-home` | 任意の`query`、`pageType`、`category`、`offset`、`limit` | wikiの現在版、作業と未統合候補、ページ送り |
+| `wiki-refresh` | 追加引数なし | 未統合の研究記録と根拠が更新された節を照合し、作業を保存 |
+| `create-wiki` | `title`、任意の`pageType`、`parentId` | 固定IDを持つページを作成 |
+| `save-wiki` | `id`、`expectedRevision`、`title`、`summary`、`sections`、`changeReason` | 節の本文を改訂。各節は`id`、`title`、`markdown`。既存の根拠を保持 |
+| `create-wiki-task` | `pageId`、`purpose`、任意の`pageRevision`、`sectionId`、`conditions`、`searchThrough` | 対象を固定した調査作業を保存。閲覧した版を対象にするときは`pageRevision`を指定 |
+| `update-wiki-task` | `id`、`expectedRevision`、`state`、担当・途中経過・理由・結果、`resultPageRevision` | 同じ調査作業を更新。完了時には比較したページ改訂と、改訂または変更不要の理由を指定 |
+| `decide-wiki-candidate` | `id`、`expectedRevision`、`state`、`pageId`、`reason`、`resultPageRevision` | 関連付け・採否を保存。統合時は確認した結果ページの改訂を指定 |
 
 文献ノートの`markdown`は表示用で、画像を同梱した出力先の`path`を基準にします。
 編集には`editText`を使います。こちらは元の`paper_note.markdown`で、画像参照も著者入力時の
@@ -64,6 +72,8 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 
 ## 保存するデータ
 
+新規ストアの形式は2です。形式1の既存ストアは読み取りできますが、書き込み前に`migrate`を実行します。移行はDBの隣の`backups/`にSQLiteバックアップを作り、既存のレコード本文・ID・改訂を保持します。通常の参照や`init`だけでは移行しません。デスクトップ通信の`version: 1`はDB形式とは別です。
+
 | 型 | 内容 |
 |---|---|
 | Paper | 書誌と外部文献管理システムへの参照 |
@@ -75,6 +85,9 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 | Topic | 共通データへの参照をまとめたテーマ |
 | PaperNote | 文献ごとのMarkdownノート、PDF版への参照、全ページの読解状況、知見の根拠 |
 | ReviewTask | PDF版ごとの読解依頼、担当、進捗、更新元のノート改訂、完了ノートへの参照 |
+| WikiPage | 横断的な解説。種類、別名、分類、親項目、節ごとの本文・固定根拠・点検状態 |
+| WikiTask | ページ・節の調査依頼、担当、途中経過、改訂または変更不要の理由 |
+| WikiCandidate | まだ統合されていない研究記録、関連しそうな項目、採否・統合先の固定改訂 |
 
 各参照は`{"id": "...", "revision": 1}`の形で特定の改訂を固定します。
 新しい判断を保存しても過去の判断と根拠は残ります。SourceとEvidenceは変更できず、別の版や抜粋には新IDを使います。
@@ -87,6 +100,23 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 関係は既定で`analyst_inference`です。著者が関係を明記している根拠を確認した場合だけ`author_explicit`を使います。
 研究上の仮説はQuestionへ保存し、著者の結果を表すClaimに混ぜません。
 
+### wikiの根拠、更新、画像
+
+`WikiPage.sections`は固定した節ID、Markdown、`basis`を持ちます。根拠は記録のID・改訂に加え、wiki内の対象節と`supports`・`challenges`・`context`を指定できます。項目間の案内は現在版のIDへ接続し、根拠への依存と分けます。本文や根拠を変更した節では以前の点検結果を引き継ぎません。
+
+根拠の新版があれば依存先をたどって再検討作業を保存します。まだ根拠に使われていない論文・Source・Evidence・主張・関係・文献ノートは候補に残します。関連ページの提案は文字列照合であり、科学的な関連性や採否はクライアントが判断します。過去版を意図的に使う研究史では、その理由を作業記録へ残してください。
+
+wiki本文の画像は、仮想の著者入力位置`data/wiki/<page hash>.md`から`../wiki-assets/`を参照します。画像をこの永続保存先へ置いてからページを登録してください。保存時の画像バイトもSQLiteへ固定し、`export-wiki`は`data/wiki/<page hash>/rN/index.md`と配下の`assets/`を書き出します。原画像の後の変更で、旧改訂の図が置き換わることはありません。出力フォルダごとコピーすれば図を持ち運べます。書き出し済みファイルへの手修正は自動で上書きしません。
+
+```powershell
+uv run --project research-engine bukan-research --store C:/Research/topic/data/research.sqlite wiki-status
+uv run --project research-engine bukan-research --store C:/Research/topic/data/research.sqlite migrate
+uv run --project research-engine bukan-research --store C:/Research/topic/data/research.sqlite wiki-home
+uv run --project research-engine bukan-research --store C:/Research/topic/data/research.sqlite export-wiki wiki-detachment
+```
+
+ページの完全な構造を変更する場合は`put_records`を使います。`save-wiki`は人間向けの本文編集用で、既存節の根拠を保持します。数値・単位による条件検索や比較表の自動生成は未実装です。設計と運用は[研究wiki](../docs/research-wiki.md)を参照してください。
+
 ## MCP操作
 
 | ツール | 操作 |
@@ -97,6 +127,8 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 | `trace_record` | テーマ・問いから主張、抜粋、原資料へ遡る |
 | `get_history` | 判断の改訂履歴を読む |
 | `store_info` | 保存件数と形式の版を確認する |
+| `research_wiki_request` | デスクトップと同じ`operation`でwikiの検索・表示・改訂・作業を扱う。上の操作表を参照 |
+| `export_wiki_page` | wikiの固定改訂を、保存時の画像とともに書き出す |
 | `get_paper_note` | 現在または指定改訂のMarkdownノートと、ページごとの読解状況を取得する |
 | `export_paper_note` | DBの隣の`paper-notes/`へ改訂ごとのMarkdownと画像のコピーを出力する。既存ファイルの編集は上書きしない |
 | `plan_paper_reviews` | 読了済みの同じPDF版を再利用し、残る文献の担当・進捗を保存する。サブエージェントの起動はクライアントが行う |
