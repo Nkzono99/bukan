@@ -1,6 +1,8 @@
 # Bukan workspace format
 
-Bukan本体と研究データは別々に管理します。新しい研究ワークスペースは`bukan init <path>`で作り、`bukan setup <path>`で研究実行環境と未作成のDBを準備します。既存ワークスペースは同じ場所で使い続けます。
+Bukan本体と研究データは別々に管理します。引数なしの`bukan setup`は、接続先が未設定なら管理領域に新しい研究ワークスペースを作り、研究実行環境とDBを準備します。Windowsでの既定の場所は`%LOCALAPPDATA%/bukan/workspaces/default`、Linuxでは`$XDG_DATA_HOME/bukan/workspaces/default`または`~/.local/share/bukan/workspaces/default`です。
+
+既存ワークスペースは同じ場所で使い続けます。保存場所を選ぶ場合は`bukan init <path>`、`bukan setup <path> --default`の順で実行します。`bukan paths --json`でデータ・設定・キャッシュと既定ワークスペースの実際の場所を確認できます。保存先の上書き方法は[利用ガイド](usage.md)を参照してください。
 
 ```text
 my-research/
@@ -47,7 +49,7 @@ bukan collection add 比較対象 p2-example C:/Research/my-workspace
 
 使い方は[利用ガイド](usage.md)を参照してください。`bukan research <path> -- <engine args>`と`bukan research-mcp <path>`は、指定したワークスペースの`data/research.sqlite`を使います。文献管理MCPは`bukan mcp <path>`で起動します。
 
-ワークスペースの解決順はコマンドの明示パス、`BUKAN_WORKSPACE`、Bukanの既定設定です。カレントディレクトリは使いません。既定設定を保存してもCodexのグローバル設定は変更しません。`bukan mcp-config <path>`で接続設定だけを表示できます。
+ワークスペースの解決順はコマンドの明示パス、`BUKAN_WORKSPACE`、Bukanの既定設定です。カレントディレクトリは使いません。`setup`はどれも未設定の場合だけ管理領域を初期化し、設定済みの接続先が壊れていればエラーにします。既定設定を保存してもCodexのグローバル設定は変更しません。`bukan mcp-config <path>`で接続設定だけを表示できます。
 
 研究エンジンの実行環境はBukanのキャッシュへ保存し、研究フォルダには置きません。配布物が研究エンジンを含むため、インストール後に開発リポジトリは不要です。Paperpileが未接続でも保存済みの研究を参照できますが、原PDFの取得には同期先が必要です。
 

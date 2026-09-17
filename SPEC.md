@@ -18,14 +18,17 @@ PDFビューアー → 原論文のページ・図表・数式
 
 | 操作 | 契約 |
 | --- | --- |
-| `setup <workspace> [--default]` | 初期化済みワークスペースの研究実行環境を準備する。DBがなければ初期化し、既存形式1は自動移行しない |
+| `setup [workspace] [--default]` | 研究実行環境を準備する。接続先が未設定なら管理領域にワークスペースを作る。DBがなければ初期化し、既存形式1は自動移行しない |
+| `paths --json` | `dataDir`、`configDir`、`cacheDir`、`managedWorkspace`、`defaultWorkspace`を表示する |
 | `research [workspace] -- <engine args>` | 解決したワークスペースの研究DBでPythonエンジンを実行する |
 | `mcp [workspace]` | 文献管理のstdio MCPを起動する |
 | `research-mcp [workspace]` | 同じ研究DBを使うstdio MCPを起動する |
 | `mcp-config [workspace] [--format json\|toml]` | 上記2サーバーの設定を標準出力へ出す。クライアント設定は変更しない |
 | `init`, `detect`, `doctor`, `scan`, `organize` | 既存の文献管理・診断・分類案生成を継続する |
 
-ワークスペースの選択は、コマンドの明示パス、`BUKAN_WORKSPACE`、Bukan専用の既定設定の順にする。カレントディレクトリから別の研究を推測しない。Bukanの既定設定とCodexのグローバル設定は別に扱う。
+ワークスペースの選択は、コマンドの明示パス、`BUKAN_WORKSPACE`、Bukan専用の既定設定の順にする。`setup`は未設定時だけ管理ワークスペースを作成する。明示したパスや保存済みの設定が不正なら停止し、別の研究へフォールバックしない。カレントディレクトリから別の研究を推測しない。Bukanの既定設定とCodexのグローバル設定は別に扱う。
+
+新規の管理ワークスペースはWindowsでは`%LOCALAPPDATA%/bukan/workspaces/default`、Linuxでは`$XDG_DATA_HOME/bukan/workspaces/default`または`~/.local/share/bukan/workspaces/default`に置く。絶対パスの`BUKAN_DATA_DIR`はBukanのデータ領域を変更し、既存ワークスペースを移動する指定にはしない。設定と再生成可能な実行環境キャッシュは分けて保存する。
 
 既存の研究DB・安定ID・改訂・ノート・wiki・図表を保持する。GUIからの移行に新しい研究フォルダへのコピーは不要である。旧アプリがAppDataへ作った管理ワークスペースも、既存の`bukan.toml`を指定して使う。手順は[利用ガイド](docs/usage.md)を参照。
 
@@ -60,6 +63,8 @@ wikiは複数論文を条件付きで比較した現在の解釈を持つ。追�
 ## 配布と保守
 
 Cargo workspaceは`crates/bukan/`、研究エンジンは`research-engine/`に置く。配布物は実行ファイル、研究エンジン、必要なSKILLを含める。プラグイン定義は`plugins/bukan/`、研究指示の正本は`templates/workspace/`に置く。
+
+Windowsはツール一式とプラグインの2段階で導入する。配布物の`install.cmd`から`install.ps1`を実行し、版と配布物ハッシュで分けたAppData内のインストール先へ配置する。固定版のuvとPoppler、研究用Python環境をユーザー領域へ準備し、管理者権限やシステムPATHの編集を前提にしない。個人マーケットプレイスの既存項目を保ってBukanを登録する。プラグインのインストール・有効化は2段階目として利用者がCodexで行う。Linuxは手動の依存導入とPythonインストーラーを継続する。
 
 新しいワークスペースは作業別SKILLを同梱する。既存のカスタム指示や個人SKILLは自動上書きせず、更新時に比較して統合する。保存形式を変える場合は後方互換を保つか形式番号を上げる。パス検査・初期化・分類・改訂の挙動はテストする。
 

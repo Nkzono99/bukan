@@ -4,29 +4,32 @@ Bukanは、Paperpileの文献を読み取り専用で検索・読解し、研究
 
 利用手順は[CLI・MCPで研究を進める](docs/usage.md)、保存形式は[ワークスペース仕様](docs/workspace.md)を参照してください。既存の研究フォルダ、DB、ノート、wikiをそのまま使います。
 
-## 研究を始める
+## Windowsでは2回の導入操作で始める
 
-配布物の`bukan`を利用できる状態にして、研究ワークスペースを指定します。
+Codexと、Google Driveから見えるPaperpile同期フォルダを用意したら、Windows用の配布zipを展開します。
 
-```powershell
-bukan init C:/Research/my-workspace
-bukan setup C:/Research/my-workspace --default
-bukan doctor C:/Research/my-workspace
-bukan mcp-config C:/Research/my-workspace --format toml
-```
+1. **`bukan/install.cmd`を実行する。** CLI、両MCP、PDF処理ツール、研究用Python環境をユーザーのAppDataへ導入します。研究フォルダが未設定なら、`%LOCALAPPDATA%/bukan/workspaces/default`を作成します。
+2. **CodexへBukanプラグインをインストールする。** インストーラーが登録した個人マーケットプレイスから選ぶか、完了時に表示される`codex plugin add ...`コマンドを実行します。
 
-`init`は新しいワークスペースを作り、`setup`は研究実行環境と未作成の研究DBを準備します。既存ワークスペースでは`init`を省略し、同じ研究DBを使います。形式1のDBは自動移行しません。`mcp-config`は文献管理・研究の2つのMCP設定を表示し、Codexのグローバル設定は変更しません。
+新しい会話で「Bukanの接続先を確認して、保存済み文献から調査を始めて」と依頼できます。Python・uv・Popplerの事前導入、管理者権限、システムPATHの編集は不要です。初回の依存取得にはネットワーク接続が必要です。Paperpileは自動検出し、既存の研究フォルダが設定済みなら、その場所を引き継ぎます。
+
+保存場所と変更方法、Linuxの手動導入、一般のMCPクライアントへの接続は[利用ガイド](docs/usage.md)を参照してください。上の2段階インストーラーはWindows用です。
+
+## CLIから使う
+
+インストーラーが表示した実行ファイルを使います。以下の`bukan`はその実行ファイルを指し、PATHへの追加は任意です。
 
 | コマンド | 用途 |
 | --- | --- |
-| `bukan setup <workspace> [--default]` | 初期化済みワークスペースの研究環境を準備し、必要ならBukanの既定値を保存する |
+| `bukan setup [workspace] [--default]` | 研究環境を準備する。接続先が未設定なら、管理領域にワークスペースを作成する |
+| `bukan paths --json` | 本体とは別に管理するデータ・設定・キャッシュと、ワークスペースの場所を表示する |
 | `bukan research [workspace] -- <engine args>` | 同じ研究DBで検索・改訂・wiki出力などを実行する |
 | `bukan mcp [workspace]` | 読み取り専用の文献索引・PDF取得用MCPを起動する |
 | `bukan research-mcp [workspace]` | 研究記録を保存・検索するMCPを起動する |
 | `bukan mcp-config [workspace] [--format json\|toml]` | 2つのMCPを登録する設定を表示する |
 | `bukan init`, `detect`, `doctor`, `scan`, `organize` | ワークスペース作成、Paperpile検出、診断、索引化、分類案の生成 |
 
-省略したワークスペースは`BUKAN_WORKSPACE`、Bukanに保存した既定値の順で決めます。カレントディレクトリからは推測しません。複数の研究を扱うときは、コマンドにパスを明示してください。
+省略したワークスペースは`BUKAN_WORKSPACE`、Bukanに保存した既定値の順で決めます。`setup`だけは、どちらも未設定なら管理領域を初期化します。設定済みの接続先に問題がある場合は停止し、別の研究へ切り替えません。複数の研究を扱うときは、コマンドにパスを明示してください。
 
 ## できること
 

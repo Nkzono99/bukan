@@ -1,8 +1,8 @@
 //! Packaged research engine with an isolated, per-user Python environment.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Command, ExitStatus, Output, Stdio},
 };
 
@@ -110,7 +110,7 @@ impl Runtime {
         if self.ready() {
             return self.check_imports();
         }
-        let uv = find_uv().ok_or_else(|| "uv was not found. Install uv from https://docs.astral.sh/uv/getting-started/installation/ and run bukan setup <workspace> again.".to_string())?;
+        let uv = find_uv()?.ok_or_else(|| "uv was not found. Run the Bukan toolkit installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/, then run bukan setup again.".to_string())?;
         fs::create_dir_all(&self.root)
             .map_err(|error| format!("Could not create the runtime directory: {error}"))?;
         let output = hidden_command(&uv)
@@ -277,8 +277,101 @@ pub(crate) fn executable_on_path(name: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-pub(crate) fn find_uv() -> Option<PathBuf> {
-    executable_on_path("uv").or_else(|| {
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PrivateDependencies {
+    version: u32,
+    uv: PathBuf,
+    poppler_bin: PathBuf,
+}
+
+fn private_dependencies() -> Result<Option<(PathBuf, PrivateDependencies)>, String> {
+    let data = settings::data_dir()?;
+    let root = storage::resolve_destination(&data.join("dependencies"))?;
+    if !root.starts_with(&data) {
+        return Err(
+            "The private dependencies directory must remain within the Bukan data directory."
+                .into(),
+        );
+    }
+    let pointer = root.join("current.json");
+    match fs::symlink_metadata(&pointer) {
+        Ok(_) => (),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Could not inspect {}: {error}", pointer.display())),
+    }
+    let pointer = private_path(&root, Path::new("current.json"))?;
+    let text = fs::read_to_string(&pointer)
+        .map_err(|error| format!("Could not read {}: {error}", pointer.display()))?;
+    let dependencies: PrivateDependencies = serde_json::from_str(&text).map_err(|error| {
+        format!(
+            "Invalid {}: {error}. Run the Bukan toolkit installer to repair it.",
+            pointer.display()
+        )
+    })?;
+    if dependencies.version != 1 {
+        return Err(format!(
+            "Unsupported private dependency format {}. Update the Bukan toolkit.",
+            dependencies.version
+        ));
+    }
+    Ok(Some((root, dependencies)))
+}
+
+fn private_path(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    if relative.as_os_str().is_empty()
+        || !relative
+            .components()
+            .all(|part| matches!(part, Component::Normal(_)))
+    {
+        return Err("Private dependency paths must be relative paths without traversal.".into());
+    }
+    let path = fs::canonicalize(root.join(relative)).map_err(|error| {
+        format!("Private dependency {} is unavailable: {error}. Run the Bukan toolkit installer to repair it.", relative.display())
+    })?;
+    if !path.starts_with(root) {
+        return Err(
+            "Private dependency links must remain within the dependencies directory.".into(),
+        );
+    }
+    Ok(path)
+}
+
+pub(crate) fn find_poppler(name: &str) -> Result<Option<PathBuf>, String> {
+    if !["pdfinfo", "pdftotext", "pdftoppm"].contains(&name) {
+        return Err("Unknown PDF processing tool".into());
+    }
+    let Some((root, dependencies)) = private_dependencies()? else {
+        return Ok(executable_on_path(name));
+    };
+    let directory = private_path(&root, &dependencies.poppler_bin)?;
+    let relative = directory
+        .strip_prefix(&root)
+        .expect("checked private path")
+        .join(if cfg!(windows) {
+            format!("{name}.exe")
+        } else {
+            name.to_string()
+        });
+    let tool = private_path(&root, &relative)?;
+    if !tool.is_file() {
+        return Err(format!(
+            "Private Poppler tool is not a file: {}",
+            tool.display()
+        ));
+    }
+    Ok(Some(tool))
+}
+
+pub(crate) fn find_uv() -> Result<Option<PathBuf>, String> {
+    if let Some((root, dependencies)) = private_dependencies()? {
+        let tool = private_path(&root, &dependencies.uv)?;
+        if !tool.is_file() {
+            return Err(format!("Private uv is not a file: {}", tool.display()));
+        }
+        return Ok(Some(tool));
+    }
+    Ok(executable_on_path("uv").or_else(|| {
         let filename = if cfg!(windows) { "uv.exe" } else { "uv" };
         let mut candidates = Vec::new();
         for name in ["USERPROFILE", "HOME"] {
@@ -296,7 +389,7 @@ pub(crate) fn find_uv() -> Option<PathBuf> {
             candidates.push(local.join("Microsoft/WinGet/Links").join(filename));
         }
         candidates.into_iter().find(|path| path.is_file())
-    })
+    }))
 }
 
 fn hidden_command(program: &Path) -> Command {
@@ -329,6 +422,31 @@ fn checked_output(output: Output, action: &str) -> Result<Output, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn private_dependencies_reject_traversal_absolute_paths_and_links_outside_root() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().join("dependencies");
+        let outside = temporary.path().join("outside");
+        fs::create_dir(&root).unwrap();
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("tool"), "fixture").unwrap();
+        let root = fs::canonicalize(root).unwrap();
+        crate::storage::link_directory(&outside, &root.join("linked"));
+        for path in [
+            Path::new(""),
+            Path::new("../outside/tool"),
+            outside.as_path(),
+            Path::new("linked/tool"),
+        ] {
+            assert!(private_path(&root, path).is_err(), "{}", path.display());
+        }
+        fs::write(root.join("tool"), "fixture").unwrap();
+        assert_eq!(
+            private_path(&root, Path::new("tool")).unwrap(),
+            root.join("tool")
+        );
+    }
 
     #[test]
     fn paths_and_arguments_are_passed_without_shell_interpolation() {

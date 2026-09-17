@@ -1,0 +1,21 @@
+{
+  "uv": {
+    "version": "0.12.15",
+    "url": "https://github.com/astral-sh/uv/releases/download/0.12.15/uv-x86_64-pc-windows-msvc.zip",
+    "sha256": "477bd99a84e34891f2bd4c9152ddeb74e971accccbc59c0f0301f11f08a32d46",
+    "bin": ".",
+    "executables": ["uv.exe", "uvw.exe", "uvx.exe"],
+    "notices": [
+      {"name": "LICENSE-MIT", "url": "https://raw.githubusercontent.com/astral-sh/uv/0.12.15/LICENSE-MIT", "sha256": "860e3d7a86b84e6a7012c7a635fc64df475cebc6cce34dfeb73a5982ec58176c"},
+      {"name": "LICENSE-APACHE", "url": "https://raw.githubusercontent.com/astral-sh/uv/0.12.15/LICENSE-APACHE", "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"}
+    ]
+  },
+  "poppler": {
+    "version": "26.09.0-0",
+    "url": "https://github.com/oschwartz10612/poppler-windows/releases/download/v26.09.0-0/Release-26.09.0-0.zip",
+    "sha256": "7a6f256a0ddf7536182246a5733331bf4677cbcc34f4663774947ad34556c8d0",
+    "bin": "poppler-26.09.0/Library/bin",
+    "executables": ["pdfinfo.exe", "pdftotext.exe", "pdftoppm.exe"],
+    "notices": []
+  }
+}

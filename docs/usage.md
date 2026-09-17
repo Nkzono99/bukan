@@ -1,22 +1,54 @@
 # CLI・MCPで研究を進める
 
-Bukanで使う研究フォルダを一度指定し、Codexから文献検索、全文読解、根拠の点検、wikiの更新を進めます。成果物はVS CodeのMarkdownプレビュー、原PDFはPDFビューアーで確認します。
+Bukanを導入し、Codexから文献検索、全文読解、根拠の点検、wikiの更新を進めます。新規の研究フォルダはユーザーのデータ領域へ自動で作成します。成果物はVS CodeのMarkdownプレビュー、原PDFはPDFビューアーで確認します。
 
 研究フォルダには`bukan.toml`と`data/research.sqlite`があります。以前のBukan GUIで使っていたものも、そのまま指定できます。Bukan本体、Codexプラグイン、研究データは別々に管理します。
 
-## 実行ファイルと研究環境を準備する
+## Windowsはツールとプラグインを順に入れる
 
-配布されたアーカイブには`bukan/`フォルダがあり、実行ファイル、研究エンジン、SKILLを含みます。Python 3.11以上を使い、展開先の`install_local.py`で導入できます。導入先の既定値は`~/plugins/bukan`です。
+前提はCodexの導入と、Google DriveからPaperpileの同期フォルダが見えることです。Driveのログイン・同期はDrive側で済ませます。Windows用の配布zipを展開し、次の2操作を行います。
 
-```powershell
-python C:/Downloads/bukan/install_local.py --bundle C:/Downloads/bukan
+1. **展開した`bukan/install.cmd`を実行する。** ダブルクリック、またはターミナルから実行できます。Bukan本体をAppDataへ配置し、固定版のuvとPoppler、研究用Python環境を準備します。`bukan setup`を実行して未作成の研究DBを用意し、個人マーケットプレイスへBukanを登録します。
+2. **CodexにBukanプラグインをインストールする。** 個人マーケットプレイスのBukanを選ぶか、インストーラーが表示した`codex plugin add bukan@<マーケットプレイス名>`を実行します。既存のマーケットプレイス名を使うため、表示された名前をそのまま使ってください。
+
+新しい会話を開き、Bukanの接続先と文献検索を確認します。ホストが追加したプラグインを読み込まない場合は再起動してください。WindowsではPython・uv・Popplerの事前導入やPATHの編集は不要です。初回のダウンロードにはネットワーク接続が必要で、途中で失敗した場合は原因を解消して`install.cmd`を再実行します。
+
+インストーラーはプラグインを有効化せず、他のプラグイン設定やCodexのモデル設定も変更しません。BukanのMCPは導入済み実行ファイルの絶対パスで起動します。日常の調査はCodexから行えるため、CLIをPATHへ追加する必要はありません。
+
+Paperpileはマウント済みのドライブから自動検出します。見つからない場合も研究の保存先は残ります。Driveの接続を確認し、必要ならワークスペースの`bukan.toml`で`paperpile.path`へ同期先の絶対パスを指定します。Paperpileのファイルは読み取り専用です。
+
+## データは本体と分けてAppDataへ保存する
+
+Windowsの既定の配置は次のとおりです。
+
+| 内容 | 保存先 |
+| --- | --- |
+| Bukan本体・プラグイン | `%LOCALAPPDATA%/bukan/installations/<version>-<bundlehash>/bukan` |
+| uv・Poppler | `%LOCALAPPDATA%/bukan/dependencies/` |
+| 新規の研究ワークスペース | `%LOCALAPPDATA%/bukan/workspaces/default/` |
+| Bukan設定 | `%APPDATA%/bukan/settings.toml` |
+| 研究用Python環境 | `%LOCALAPPDATA%/bukan/research-runtime/` |
+| 原論文 | 既存のGoogle Drive／Paperpile同期先 |
+
+`workspaces/default/`は永続データです。SQLite、wiki、文献ノート、図表、作業記録を含むため、キャッシュ削除の対象にしません。AppData配下でも自動でバックアップされるわけではなく、研究フォルダ全体をバックアップ対象にしてください。既に接続先を設定していれば、新しいフォルダへ移さず元の研究を使います。
+
+実際の保存先は`bukan paths --json`で確認できます。`dataDir`、`configDir`、`cacheDir`、`managedWorkspace`、`defaultWorkspace`を表示します。このガイドの`bukan`は、インストーラーが表示した実行ファイルの絶対パスに置き換えて使えます。名前で呼びたい場合だけ、その`bin`フォルダを自分のPATHへ追加します。
+
+Linuxのデータ領域は`$XDG_DATA_HOME/bukan`または`~/.local/share/bukan`、設定は`$XDG_CONFIG_HOME/bukan`または`~/.config/bukan`、キャッシュは`$XDG_CACHE_HOME/bukan`または`~/.cache/bukan`です。絶対パスの`BUKAN_DATA_DIR`、`BUKAN_CONFIG_DIR`、`BUKAN_CACHE_DIR`で各領域を変更できます。`BUKAN_DATA_DIR`を変えても、既存の研究フォルダは移動しません。
+
+Windowsの2段階インストーラーでは、個人マーケットプレイスから参照できるよう、本体のデータ領域をユーザープロファイル内に置きます。`BUKAN_DATA_DIR`でプロファイル外を指定する構成は、下記の手動導入を使ってください。研究ワークスペース自体は別ドライブにも置けます。インストール時の`BUKAN_*`による保存先・接続先の指定は、プラグインのMCP設定にも引き継ぎます。
+
+## Linuxや手動構成で準備する
+
+Windows用の2段階インストーラー以外では、Python 3.11以上、uv、Popplerを先に用意します。Linuxでは使用中のディストリビューションの方法でPopplerを導入してください。配布物を展開し、Pythonインストーラーを実行します。
+
+```sh
+python3 /path/to/bukan/install_local.py --bundle /path/to/bukan
 ```
 
-既存の導入先は上書きしません。更新時の扱いと開発用のパッケージ生成は[プラグインの説明](../plugins/bukan/README.md)を参照してください。
+導入先の既定値は`~/plugins/bukan`で、既存の導入先は上書きしません。出力された実行ファイルで`bukan setup`を実行し、ホストの手順でプラグインを登録・インストールします。この手動経路のインストーラーは依存ツールの導入や個人マーケットプレイスの登録を行いません。
 
-CLIを`bukan`という名前で呼ぶ場合は`~/plugins/bukan/bin`をPATHへ追加するか、実行ファイルの絶対パスを使います。インストーラーは導入先プラグインのMCP設定を絶対パスにするため、プラグイン起動にはPATH追加は不要です。研究環境の準備には`uv`が必要です。PDF取得にはPopplerの`pdfinfo`、`pdftotext`、`pdftoppm`が必要で、準備方法は[PDF読解](full-paper-reading.md)を参照してください。
-
-新しい研究を作る場合は、最初にワークスペースを初期化します。
+`setup`は研究実行環境を準備し、研究DBがなければ作成します。接続先が未設定なら管理領域のワークスペースを作成します。保存先を選んで新しい研究を作る場合は次のようにします。
 
 ```powershell
 bukan init C:/Research/my-workspace
@@ -24,9 +56,7 @@ bukan setup C:/Research/my-workspace --default
 bukan doctor C:/Research/my-workspace
 ```
 
-`setup`は研究エンジンの実行環境を準備し、研究DBがなければ作成します。初回の依存パッケージ取得にはネットワーク接続が必要です。Pythonの実行環境はBukanのキャッシュに置き、研究フォルダとは分けます。`uv`自体は自動導入しません。
-
-`--default`はBukanの既定ワークスペースを保存します。Windowsでは`%APPDATA%/bukan/settings.toml`、実行環境のキャッシュは`%LOCALAPPDATA%/bukan/research-runtime`です。Unixではそれぞれ`$XDG_CONFIG_HOME/bukan`または`~/.config/bukan`、`$XDG_CACHE_HOME/bukan`または`~/.cache/bukan`を使います。必要なら絶対パスの`BUKAN_CONFIG_DIR`と`BUKAN_CACHE_DIR`で変更できます。
+更新と開発用パッケージの詳細は[プラグインの説明](../plugins/bukan/README.md)を参照してください。
 
 ## 既存の研究フォルダを使い続ける
 
@@ -63,7 +93,7 @@ JSON形式を使うクライアントでは`--format json`を指定します。�
 
 `mcp-config`は設定の表示だけを行い、Codexのグローバル設定を編集しません。プラグインから利用する場合も、設定したBukanの実行ファイルとワークスペースを使います。プラグインの登録方法は[配布定義](../plugins/bukan/README.md)を参照してください。
 
-コマンドでワークスペースを省略した場合は、`BUKAN_WORKSPACE`、Bukanの既定設定の順で解決します。`BUKAN_WORKSPACE`には絶対パスを指定します。現在いるディレクトリからの推測は行いません。複数の研究へ接続するときは、パスを明示したMCP設定を使います。
+コマンドでワークスペースを省略した場合は、`BUKAN_WORKSPACE`、Bukanの既定設定の順で解決します。`BUKAN_WORKSPACE`には絶対パスを指定します。`setup`だけは両方が未設定の場合に管理ワークスペースを初期化します。指定済みのフォルダが不正・不在なら停止し、別の研究を自動作成して切り替えることはありません。複数の研究へ接続するときは、パスを明示したMCP設定を使います。
 
 ## 問いを伝え、保存済みの研究から続ける
 

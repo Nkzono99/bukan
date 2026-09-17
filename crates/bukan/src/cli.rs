@@ -33,9 +33,14 @@ enum Command {
     },
     /// Find mounted Paperpile libraries without modifying them.
     Detect,
-    /// Prepare the private research runtime and initialize only an absent research DB.
+    /// Show data, settings and runtime paths without creating any files.
+    Paths {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Prepare research; with no existing binding, create the managed user-data workspace.
     Setup {
-        workspace: PathBuf,
+        workspace: Option<PathBuf>,
         #[arg(long)]
         default: bool,
     },
@@ -162,16 +167,53 @@ pub fn run() -> Result<i32, String> {
                 println!("{}", root.display());
             }
         }
+        Command::Paths { json: as_json } => {
+            settings::validate_settings()?;
+            let binding = settings::configured_workspace(None)?;
+            let data_dir = settings::data_dir()?;
+            let config_dir = settings::config_dir()?;
+            let cache_dir = settings::cache_dir()?;
+            if let Some(binding) = &binding {
+                for directory in [&data_dir, &config_dir, &cache_dir] {
+                    settings::validate_external_destination(&binding.root, directory)?;
+                }
+            }
+            // A valid environment binding may override an invalid saved value.
+            // Report that value separately without rejecting the selected workspace.
+            let (default_workspace, default_error) = match settings::read_default() {
+                Ok(path) => (path, None),
+                Err(error) => (None, Some(error)),
+            };
+            let mut paths = json!({
+                "dataDir": data_dir,
+                "configDir": config_dir,
+                "cacheDir": cache_dir,
+                "managedWorkspace": settings::managed_workspace()?,
+                "defaultWorkspace": default_workspace,
+                "selectedWorkspace": binding.as_ref().map(|binding| &binding.root),
+                "workspaceSource": binding.as_ref().map(|binding| binding.source),
+            });
+            if let Some(error) = default_error {
+                paths["defaultWorkspaceError"] = json!(error);
+            }
+            if as_json {
+                print_json(&paths)?;
+            } else {
+                for (name, path) in paths.as_object().expect("path object") {
+                    println!("{name}: {}", path.as_str().unwrap_or("not configured"));
+                }
+            }
+        }
         Command::Setup { workspace, default } => {
-            let root = bind(Some(&workspace))?;
+            // Fail on unreadable settings before creating a managed workspace.
+            settings::validate_settings()?;
+            let binding = settings::setup_workspace(workspace.as_deref())?;
+            let root = binding.root;
+            eprintln!("Workspace: {} ({})", root.display(), binding.source);
             settings::validate_external_destination(
                 &root,
                 &settings::config_dir()?.join("settings.toml"),
             )?;
-            // Fail on unreadable settings before doing downloads or initializing a DB.
-            if !default {
-                settings::read_default()?;
-            }
             let initialized = runtime::setup(&root)?;
             let saved = settings::save_default(&root, default)?;
             println!("Research runtime is ready.");
@@ -220,10 +262,21 @@ pub fn run() -> Result<i32, String> {
             let root = bind(workspace.as_deref())?;
             let descriptor = workspace::describe_workspace(&root)?;
             let runtime = runtime::status();
+            let mut dependency_errors = Vec::new();
             let poppler = ["pdfinfo", "pdftotext", "pdftoppm"]
                 .into_iter()
-                .map(|name| (name.to_string(), json!(runtime::executable_on_path(name))))
+                .map(|name| {
+                    let path = runtime::find_poppler(name).unwrap_or_else(|error| {
+                        dependency_errors.push(format!("{name}: {error}"));
+                        None
+                    });
+                    (name.to_string(), json!(path))
+                })
                 .collect::<serde_json::Map<_, _>>();
+            let uv = runtime::find_uv().unwrap_or_else(|error| {
+                dependency_errors.push(format!("uv: {error}"));
+                None
+            });
             let store = storage::store_path(&root)?;
             let healthy = descriptor.paperpile_root.is_some()
                 && runtime.ready
@@ -231,7 +284,7 @@ pub fn run() -> Result<i32, String> {
                 && poppler.values().all(|path| !path.is_null());
             if as_json {
                 print_json(
-                    &json!({"healthy": healthy, "workspace": descriptor, "researchRuntime": runtime, "researchStore": {"path": store, "initialized": store.is_file()}, "uv": runtime::find_uv(), "poppler": poppler}),
+                    &json!({"healthy": healthy, "workspace": descriptor, "researchRuntime": runtime, "researchStore": {"path": store, "initialized": store.is_file()}, "uv": uv, "poppler": poppler, "dependencyErrors": dependency_errors}),
                 )?;
             } else {
                 println!(
@@ -262,8 +315,11 @@ pub fn run() -> Result<i32, String> {
                     println!(
                         "{name}: {}",
                         path.as_str()
-                            .unwrap_or("not found; install Poppler on PATH")
+                            .unwrap_or("not found; run the Bukan toolkit installer")
                     );
+                }
+                for error in dependency_errors {
+                    println!("Dependency: {error}");
                 }
             }
         }

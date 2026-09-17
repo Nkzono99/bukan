@@ -6,9 +6,11 @@ Rust内部型に依存しないPythonパッケージで、CLI、stdio MCP、汎�
 
 ## 起動
 
-通常の利用では、配布物の`bukan setup <workspace>`で初期化済みワークスペースの研究環境を準備し、`bukan research <workspace> -- <engine args>`または`bukan research-mcp <workspace>`から実行します。[利用ガイド](../docs/usage.md)を参照してください。
+Windowsで通常利用する場合は、配布物の`install.cmd`、Codexへのプラグインインストールの2操作で準備します。インストーラーが`bukan setup`を実行するため、Python・uvの事前導入や研究フォルダの手動作成は不要です。新規の研究は`%LOCALAPPDATA%/bukan/workspaces/default`、実行環境は`%LOCALAPPDATA%/bukan/research-runtime`に置きます。既存の研究フォルダが設定済みならその場所を保ちます。[利用ガイド](../docs/usage.md)を参照してください。
 
-Python 3.11以上とuvを使います。以下はリポジトリのルートから実行する例です。
+CLIからは`bukan research [workspace] -- <engine args>`または`bukan research-mcp [workspace]`を使います。`bukan paths --json`で保存場所を確認できます。Linuxの手動導入でも、引数なしの`bukan setup`で未設定時の管理ワークスペースを作れます。
+
+研究エンジンを単体で開発する場合はPython 3.11以上とuvを使います。以下はリポジトリのルートから実行する例です。
 ストアは所有ホストのローカルディスク上に置きます。
 
 ```powershell

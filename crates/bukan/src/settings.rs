@@ -13,7 +13,22 @@ pub struct WorkspaceBinding {
 }
 
 pub fn bind_workspace(explicit: Option<&Path>) -> Result<WorkspaceBinding, String> {
-    let (path, source) = if let Some(path) = explicit {
+    configured_workspace(explicit)?.ok_or_else(|| {
+        "No workspace is configured. Run bukan setup to create the managed workspace, or pass an existing workspace path.".to_string()
+    })
+}
+
+pub fn configured_workspace(explicit: Option<&Path>) -> Result<Option<WorkspaceBinding>, String> {
+    workspace_selection(explicit)?
+        .map(|(path, source)| {
+            let (root, _) = workspace::load_workspace(&path)?;
+            Ok(WorkspaceBinding { root, source })
+        })
+        .transpose()
+}
+
+fn workspace_selection(explicit: Option<&Path>) -> Result<Option<(PathBuf, &'static str)>, String> {
+    let selected = if let Some(path) = explicit {
         (path.to_path_buf(), "argument")
     } else if let Some(path) = std::env::var_os("BUKAN_WORKSPACE") {
         (
@@ -21,10 +36,47 @@ pub fn bind_workspace(explicit: Option<&Path>) -> Result<WorkspaceBinding, Strin
             "BUKAN_WORKSPACE",
         )
     } else {
-        (read_default()?.ok_or_else(|| "No workspace is configured. Pass a workspace path, set BUKAN_WORKSPACE to an absolute path, or run bukan setup <workspace> --default.".to_string())?, "saved default")
+        let Some(path) = read_default()? else {
+            return Ok(None);
+        };
+        (path, "saved default")
+    };
+    Ok(Some(selected))
+}
+
+/// Only explicit setup may initialize a managed workspace. Invalid configured
+/// bindings remain errors so an offline drive never silently creates a new DB.
+pub fn setup_workspace(explicit: Option<&Path>) -> Result<WorkspaceBinding, String> {
+    let (path, source) = match workspace_selection(explicit)? {
+        Some(selected) => selected,
+        None => {
+            let path = managed_workspace()?;
+            if !path
+                .join("bukan.toml")
+                .try_exists()
+                .map_err(|error| error.to_string())?
+            {
+                workspace::init_workspace(&path, Some("Bukan Research"), None)?;
+            }
+            (path, "managed default")
+        }
     };
     let (root, _) = workspace::load_workspace(&path)?;
     Ok(WorkspaceBinding { root, source })
+}
+
+/// Durable user data is separate from replaceable toolkit/plugin installations.
+pub fn data_dir() -> Result<PathBuf, String> {
+    user_directory(
+        "BUKAN_DATA_DIR",
+        "LOCALAPPDATA",
+        "XDG_DATA_HOME",
+        ".local/share",
+    )
+}
+
+pub fn managed_workspace() -> Result<PathBuf, String> {
+    Ok(data_dir()?.join("workspaces/default"))
 }
 
 pub fn config_dir() -> Result<PathBuf, String> {
@@ -94,6 +146,12 @@ fn read_settings(directory: &Path) -> Result<(PathBuf, toml::Table), String> {
         Err(error) => return Err(format!("Could not read {}: {error}", path.display())),
     };
     Ok((path, settings))
+}
+
+/// Check readability and syntax without interpreting a binding that an explicit
+/// argument or environment setting may override.
+pub(crate) fn validate_settings() -> Result<(), String> {
+    read_settings(&config_dir()?).map(|_| ())
 }
 
 pub fn read_default() -> Result<Option<PathBuf>, String> {

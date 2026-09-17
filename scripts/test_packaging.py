@@ -10,7 +10,7 @@ import unittest
 import zipfile
 
 from install_local import digest, install_bundle
-from package_release import ROOT, package_release
+from package_release import ROOT, WINDOWS_INSTALL_FILES, package_release
 
 
 class PackagingTests(unittest.TestCase):
@@ -28,6 +28,8 @@ class PackagingTests(unittest.TestCase):
         self.write("research-engine/uv.lock", "version = 1\n")
         self.write("research-engine/src/bukan_research/cli.py", "def main(): pass\n")
         self.write("scripts/install_local.py", (ROOT / "scripts/install_local.py").read_text(encoding="utf-8"))
+        for name in WINDOWS_INSTALL_FILES:
+            self.write(f"scripts/{name}", (ROOT / "scripts" / name).read_text(encoding="utf-8"))
         self.binary = self.write("target/release/bukan.exe", "placeholder executable\n")
 
     def write(self, relative, contents):
@@ -48,6 +50,10 @@ class PackagingTests(unittest.TestCase):
         self.write("plugins/bukan/.env", "secret")
         self.write("Paperpile/paper.pdf", "private source")
         bundle, archive = self.package()
+        metadata = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
+        for name in WINDOWS_INSTALL_FILES:
+            self.assertEqual((bundle / name).read_bytes(), (self.root / "scripts" / name).read_bytes())
+            self.assertEqual(metadata["files"][name], digest(bundle / name))
         source = self.root / "templates/workspace/.agents/skills/bukan-paper-review"
         for path in source.rglob("*.md"):
             self.assertEqual(path.read_bytes(), (bundle / "skills/bukan-paper-review" / path.relative_to(source)).read_bytes())
@@ -61,6 +67,12 @@ class PackagingTests(unittest.TestCase):
     def test_missing_binary_does_not_create_output(self):
         with self.assertRaises(FileNotFoundError):
             self.package(binary=self.root / "missing.exe")
+        self.assertFalse(self.output.exists())
+
+    def test_missing_windows_installer_does_not_create_output(self):
+        (self.root / "scripts/install.ps1").unlink()
+        with self.assertRaisesRegex(ValueError, "Missing or linked package input"):
+            self.package()
         self.assertFalse(self.output.exists())
 
     def test_version_and_target_checks_before_writes(self):
@@ -120,10 +132,16 @@ class PackagingTests(unittest.TestCase):
     def test_unix_executable_name_and_archive_permissions(self):
         binary = self.write("target/release/bukan", "placeholder unix executable")
         bundle, archive = self.package(binary=binary, target="x86_64-unknown-linux-gnu")
+        metadata = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
+        for name in WINDOWS_INSTALL_FILES:
+            self.assertFalse((bundle / name).exists())
+            self.assertNotIn(name, metadata["files"])
         executable = install_bundle(bundle, self.destination)
         self.assertEqual(executable.name, "bukan")
         with zipfile.ZipFile(archive) as zipped:
             self.assertEqual(zipped.getinfo("bukan/bin/bukan").external_attr >> 16 & 0o777, 0o755)
+            for name in WINDOWS_INSTALL_FILES:
+                self.assertNotIn(f"bukan/{name}", zipped.namelist())
         servers = json.loads((self.destination / ".mcp.json").read_text())["mcpServers"]
         self.assertTrue(all(server["command"] == str(executable) for server in servers.values()))
 

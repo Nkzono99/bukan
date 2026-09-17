@@ -17,6 +17,9 @@ from install_local import digest, read_mcp_config, validate_destination
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WINDOWS_INSTALL_FILES = (
+    "install.cmd", "install.ps1", "install_windows.py", "windows-dependencies.json",
+)
 
 
 def source_files(root: Path, suffix: str) -> list[Path]:
@@ -68,6 +71,8 @@ def package_release(binary: Path, target: str, output_dir: Path,
         "research-engine/pyproject.toml": engine / "pyproject.toml",
         "research-engine/uv.lock": engine / "uv.lock",
     }
+    if executable == "bukan.exe":
+        inputs.update({name: root / "scripts" / name for name in WINDOWS_INSTALL_FILES})
     for folder, suffix, prefix in ((engine / "src", ".py", "research-engine/src"),
                                     (review, ".md", "skills/bukan-paper-review"),
                                     (setup, ".md", "skills")):

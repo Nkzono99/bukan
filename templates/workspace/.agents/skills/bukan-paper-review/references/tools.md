@@ -13,11 +13,20 @@ The research MCP stores analysis in `data/research.sqlite`, also used by
 engine does not run an LLM, crawler, scheduler or autonomous background research.
 Saving a task does not start a worker.
 
-`bukan setup <workspace> --default` prepares an initialized workspace and can
-bind it as Bukan's default. Workspace selection is explicit path, then
-`BUKAN_WORKSPACE`, then Bukan's saved default; the current directory is not a
-fallback. `bukan mcp-config <workspace> --format toml` prints the library and
-research MCP configuration without changing the host's global settings.
+`bukan setup` prepares the research runtime and, only when no workspace is
+selected, creates a managed workspace in the OS user data directory. Windows
+defaults to `%LOCALAPPDATA%/bukan/workspaces/default`; Linux uses
+`$XDG_DATA_HOME/bukan/workspaces/default` or `~/.local/share/bukan/workspaces/default`.
+These are persistent research data. `bukan paths --json` reports the data,
+configuration, cache, and workspace locations. An absolute `BUKAN_DATA_DIR`
+overrides the managed data root without moving existing research.
+
+Workspace selection is explicit path, then `BUKAN_WORKSPACE`, then Bukan's saved
+default; the current directory is not a fallback. Invalid configured paths must
+be resolved, not replaced with a new empty store. Use
+`bukan setup <workspace> --default` to select an existing workspace explicitly.
+`bukan mcp-config <workspace> --format toml` prints the library and research MCP
+configuration without changing the host's global settings.
 
 Read the requested records and tasks directly through the MCP. Earlier saved
 requests under `queries/requests/` remain useful context. Legacy
@@ -44,7 +53,9 @@ context files; they do not track a viewer selection in this workflow. Use explic
 IDs for current research. List saving writes only the research workspace, never
 Paperpile. `clear_paper_list` clears the saved current list.
 
-PDF tools need Poppler on PATH. They can trigger Drive hydration but do not modify
+PDF tools use Bukan's installed Poppler or a manually prepared Poppler on PATH.
+The Windows `install.cmd` prepares private dependencies; manual installations
+must provide them. PDF access can trigger Drive hydration but does not modify
 originals. Page batches are 1–10 pages and page images have a maximum dimension of
 2,000 pixels. Failed extraction or a changed hash must stay visible; retrieval
 does not assess reading completion. An external PDF can be captured as a research

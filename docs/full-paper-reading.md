@@ -9,14 +9,15 @@ PDF取得時にはDriveが実体をダウンロードする場合があるため
 
 ## 準備と起動
 
-Popplerの`pdfinfo`、`pdftotext`、`pdftoppm`をPATHに置きます。Windowsでは次で導入できます。
+Windows用配布物の`install.cmd`はPopplerの`pdfinfo`、`pdftotext`、`pdftoppm`をBukan専用の依存領域へ準備します。通常の[2段階の導入](usage.md)では、Popplerの別途インストールやPATH編集は不要です。
+
+手動構成ではPopplerをPATHに置きます。Windowsで自分で管理する場合の例です。
 
 ```powershell
 winget install --id oschwartz10612.Poppler --exact
 ```
 
-インストール後はMCPホストとターミナルを再起動し、新しいPATHを読み込みます。既に導入済みなら再インストールは不要です。
-配布物のCLIから文献管理MCPを起動できます。
+手動でPATHを変更した場合はMCPホストとターミナルを再起動します。既に使えるPopplerがあるなら再インストールは不要です。配布物のCLIから文献管理MCPを起動できます。
 
 ```powershell
 bukan mcp C:/Research/my-workspace

@@ -118,9 +118,9 @@ impl Document {
 }
 
 fn poppler_command(name: &str) -> Result<Command, String> {
-    crate::runtime::executable_on_path(name)
+    crate::runtime::find_poppler(name)?
         .map(Command::new)
-        .ok_or_else(|| format!("Poppler {name} was not found in an absolute PATH directory. Install Poppler and add its binary directory to PATH."))
+        .ok_or_else(|| format!("Poppler {name} was not found. Run the Bukan toolkit installer, or install Poppler on PATH."))
 }
 
 fn parse_page_count(info: &str) -> Result<u32, String> {
@@ -153,7 +153,7 @@ fn run_poppler(command: &mut Command) -> Result<(Vec<u8>, String), String> {
         command.creation_flags(0x0800_0000);
     }
     let mut child = command.spawn().map_err(|e| format!(
-        "Could not start Poppler {:?}. Install pdfinfo, pdftotext and pdftoppm on PATH, then restart Bukan: {e}", command.get_program()))?;
+        "Could not start Poppler {:?}. Repair the Bukan toolkit or your Poppler installation: {e}", command.get_program()))?;
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {

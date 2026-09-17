@@ -55,7 +55,8 @@ def read_mcp_config(path: Path) -> dict:
     return config
 
 
-def install_bundle(bundle: Path, destination: Path) -> Path:
+def verify_bundle(bundle: Path) -> tuple[dict, dict[str, Path], dict]:
+    """Validate every declared input before executing or copying a release."""
     bundle = bundle.expanduser().resolve()
     metadata = json.loads(bundle_path(bundle, "bundle.json").read_text(encoding="utf-8"))
     if metadata.get("formatVersion") != 1:
@@ -75,6 +76,13 @@ def install_bundle(bundle: Path, destination: Path) -> Path:
         if digest(source) != files[relative]:
             raise ValueError(f"Bundle checksum mismatch: {relative}")
     mcp = read_mcp_config(sources[".mcp.json"])
+    return metadata, sources, mcp
+
+
+def install_bundle(bundle: Path, destination: Path) -> Path:
+    bundle = bundle.expanduser().resolve()
+    metadata, sources, mcp = verify_bundle(bundle)
+    binary = metadata["binary"]
     # Resolve before writing; never merge into an existing/custom installation.
     if os.path.lexists(destination.expanduser()):
         raise FileExistsError(f"Installation destination already exists: {destination}")
@@ -108,8 +116,8 @@ def main() -> None:
     print(f"Installed executable: {executable}")
     print(f"Plugin folder: {executable.parent.parent}")
     print(f"Optional PATH entry: {executable.parent}")
-    print('For a new workspace: run the executable with init "/absolute/workspace"')
-    print('Then run it with setup "/absolute/workspace" --default')
+    print('Run the executable with setup to prepare the managed or saved workspace.')
+    print('Or use setup "/absolute/existing-workspace" --default to select an existing workspace.')
     print("Finally install the plugin in your agent host.")
     print("PATH, host configuration, and research data were not changed.")
 
