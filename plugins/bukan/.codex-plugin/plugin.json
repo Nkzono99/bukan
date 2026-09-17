@@ -1,0 +1,19 @@
+{
+  "name": "bukan",
+  "version": "0.2.2",
+  "description": "Read local papers and maintain evidence-backed research notes with Bukan.",
+  "author": {
+    "name": "Bukan contributors"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Bukan",
+    "shortDescription": "Local literature and research tools.",
+    "longDescription": "Connect to a Bukan workspace through local library and research MCP servers, with paper review and setup skills. Paperpile sources remain read-only.",
+    "developerName": "Bukan contributors",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "defaultPrompt": ["Review a paper in my Bukan workspace.", "Set up my local Bukan research tools."]
+  },
+  "mcpServers": "./.mcp.json"
+}

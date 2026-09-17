@@ -1,4 +1,4 @@
-name: Release desktop app
+name: Release CLI and plugin
 
 on:
   push:
@@ -6,91 +6,66 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  release-windows:
-    name: Build Windows installer
-    runs-on: windows-latest
-
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary: target/release/bukan.exe
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary: target/release/bukan
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-python@v5
         with:
-          node-version: 22
-          cache: npm
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: src-tauri -> target
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: Verify release version
-        shell: pwsh
-        run: |
-          $tagVersion = "${{ github.ref_name }}" -replace '^v', ''
-          $tauriVersion = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
-          $packageVersion = (Get-Content package.json | ConvertFrom-Json).version
-          $cargoMetadata = cargo metadata --manifest-path src-tauri/Cargo.toml --no-deps --format-version 1 | ConvertFrom-Json
-          $cargoVersion = ($cargoMetadata.packages | Where-Object { $_.name -eq 'bukan' }).version
-
-          if ($tagVersion -ne $tauriVersion -or $tagVersion -ne $packageVersion -or $tagVersion -ne $cargoVersion) {
-            throw "Tag version $tagVersion must match tauri.conf.json ($tauriVersion), package.json ($packageVersion), and Cargo.toml ($cargoVersion)."
-          }
-
-      - name: Run Rust tests
-        run: cargo test --locked --manifest-path src-tauri/Cargo.toml
-
-      - name: Build and publish unsigned installer
-        uses: tauri-apps/tauri-action@v1
+          python-version: "3.12"
+      - name: Install uv
+        run: python -m pip install uv
+      - name: Test Rust
+        run: cargo test --workspace --locked
+      - name: Test research engine
+        run: uv run --locked --project research-engine pytest research-engine/tests -q
+      - name: Test packaging
+        run: python -m unittest discover -s scripts -p "test_*.py"
+      - name: Build CLI
+        run: cargo build --release --locked --bin bukan
+      - name: Verify tag and build plugin bundle
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: python scripts/package_release.py --binary "${{ matrix.binary }}" --target "${{ matrix.target }}" --output-dir dist --version "${RELEASE_TAG#v}"
+      - uses: actions/upload-artifact@v4
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: Bukan ${{ github.ref_name }}
-          releaseBody: Windows向けの署名なしNSISインストーラーです。
-          generateReleaseNotes: true
-          releaseDraft: false
-          prerelease: false
-          args: --bundles nsis
-          updaterJsonPreferNsis: true
+          name: bukan-${{ matrix.target }}
+          path: dist/*.zip
+          if-no-files-found: error
 
-      - name: Keep updater metadata compatible with installed private-release clients
-        shell: pwsh
+  draft-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bukan-*
+          path: bundles
+          merge-multiple: true
+      - name: Create draft release
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $metadataDirectory = Join-Path $env:RUNNER_TEMP "bukan-updater-metadata"
-          New-Item -ItemType Directory -Path $metadataDirectory -Force | Out-Null
-          gh release download "${{ github.ref_name }}" --pattern latest.json --dir $metadataDirectory --clobber
-
-          $release = gh api "repos/${{ github.repository }}/releases/tags/${{ github.ref_name }}" | ConvertFrom-Json
-          $installer = $release.assets |
-            Where-Object { $_.name -match '_x64-setup\.exe$' } |
-            Select-Object -First 1
-          if (-not $installer) {
-            throw "The Windows installer asset was not found."
-          }
-
-          $metadataPath = Join-Path $metadataDirectory "latest.json"
-          $metadata = Get-Content -LiteralPath $metadataPath -Raw | ConvertFrom-Json
-          foreach ($platform in $metadata.platforms.PSObject.Properties) {
-            $platform.Value.url = $installer.browser_download_url
-          }
-          $metadata | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $metadataPath -Encoding utf8
-          gh release upload "${{ github.ref_name }}" $metadataPath --clobber
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release create "$RELEASE_TAG" bundles/*.zip --verify-tag --draft --generate-notes --title "Bukan $RELEASE_TAG"

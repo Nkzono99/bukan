@@ -9,7 +9,10 @@ from .store import Store
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Local research store; keep --store outside Paperpile and the source repository.")
+    parser = argparse.ArgumentParser(
+        description="Local research store; keep --store outside Paperpile and the source repository.",
+        allow_abbrev=False,
+    )
     parser.add_argument("--store", type=Path, required=True)
     commands = parser.add_subparsers(dest="command", required=True)
     commands.add_parser("init")
@@ -20,7 +23,8 @@ def main():
     commands.add_parser("wiki-refresh", help="Refresh durable wiki integration candidates and stale-section tasks")
     commands.add_parser("export")
     commands.add_parser("serve")
-    commands.add_parser("desktop", help="Read one versioned desktop JSON request from stdin")
+    commands.add_parser("request", help="Read one versioned workspace JSON request from stdin")
+    commands.add_parser("desktop", help="Compatibility alias for request with legacy author provenance")
     note = commands.add_parser("export-note")
     note.add_argument("id")
     note.add_argument("--revision", type=int)
@@ -53,20 +57,21 @@ def main():
             case "wiki-status":
                 result = store.status()
             case "wiki-home" | "wiki-refresh":
-                from .desktop import handle_request
+                from .workspace_api import handle_request
                 result = handle_request(store, {"operation": args.command})
             case "export-wiki":
                 from .wiki import export_wiki
                 result = export_wiki(store, args.id, args.revision)
             case "export":
                 result = store.export()
-            case "desktop":
-                from .desktop import handle_request
+            case "request" | "desktop":
+                from .workspace_api import handle_request
                 try:
                     request = json.loads(sys.stdin.read().lstrip("\ufeff"))
                 except RecursionError:
-                    raise ValueError("Desktop request JSON is nested too deeply.") from None
-                result = handle_request(store, request)
+                    raise ValueError("Request JSON is nested too deeply.") from None
+                author = "desktop-user" if args.command == "desktop" else "cli-user"
+                result = handle_request(store, request, author=author)
             case "serve":
                 from .server import create_server
                 store.info()

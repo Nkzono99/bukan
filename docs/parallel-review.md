@@ -203,9 +203,11 @@ screening can run beside full-paper workers. Save bibliographic candidates and
 legal alternative versions outside Paperpile; do not treat screening as a full
 review or metadata access as a downloaded PDF.
 
-Tasks and notes are append-only records in the existing format-1 SQLite store.
+Tasks and notes are append-only records in the existing research SQLite store.
 Reopening the store preserves pending work, running assignments, prior results,
-and every note revision. No migration of existing records is needed.
+and every note revision. New stores use format 2; reading a format-1 store does
+not migrate it. Before writing to format 1, explicitly run the engine's `migrate`
+command, which creates a SQLite backup and preserves existing records.
 
 The states are `pending`, `running`, `completed`, and `needs_followup`. A failed
 worker or unreadable paper moves to `needs_followup` with a concrete `problem`,

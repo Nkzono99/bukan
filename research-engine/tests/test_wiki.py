@@ -4,7 +4,7 @@ import sqlite3
 
 import pytest
 
-from bukan_research.desktop import handle_request
+from bukan_research.workspace_api import handle_request
 from bukan_research.models import Claim, PaperNote, Ref, WikiAudit, WikiBasis, WikiCandidate, WikiPage, WikiSection, WikiTask, Write
 from bukan_research.store import Store
 from bukan_research.wiki import export_wiki, wiki_detail, wiki_home

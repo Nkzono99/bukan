@@ -1,0 +1,25 @@
+[package]
+name = "bukan"
+version = "0.2.2"
+description = "A read-only literature workspace for Paperpile"
+authors = ["Bukan contributors"]
+edition = "2021"
+default-run = "bukan"
+
+[lib]
+name = "bukan_lib"
+
+[dependencies]
+base64 = "0.22"
+blake3 = "1"
+clap = { version = "4", features = ["derive"] }
+regex = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+toml = "0.9"
+walkdir = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Globalization"] }

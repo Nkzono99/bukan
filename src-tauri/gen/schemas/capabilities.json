@@ -1,1 +1,0 @@
-{"main-capability":{"identifier":"main-capability","description":"Capabilities for the Bukan main window","local":true,"windows":["main"],"permissions":["core:default","dialog:allow-open"]}}

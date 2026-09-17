@@ -259,7 +259,7 @@ def wiki_authoring_path(store, identifier):
 
 
 def page_markdown(page, revision):
-    from .desktop import _literal
+    from .workspace_api import _literal
     lines = [f"# {_literal(page.title)}", "", page.summary, "", f"<!-- {page.id}@{revision} -->", ""]
     if page.search_through:
         lines += [f"Search through: {_literal(page.search_through)}", ""]
@@ -275,7 +275,7 @@ def page_markdown(page, revision):
 
 
 def snapshot_page(store, db, page, revision):
-    from .desktop import _TransactionStore
+    from .workspace_api import _TransactionStore
     from .notes import get_note, note_authoring_path
 
     def bundle(markdown, base, asset_root):
@@ -334,7 +334,7 @@ def snapshot_page(store, db, page, revision):
 
 def _portable_bundle(store, db, identifier, revision):
     """Bundle linked wiki revisions and their exact provenance into local Markdown files."""
-    from .desktop import _record_markdown
+    from .workspace_api import _record_markdown
 
     root = (identifier, revision, None)
     root_row = db.execute("SELECT created_at FROM records WHERE id=? AND revision=?", root[:2]).fetchone()
@@ -540,7 +540,7 @@ def wiki_home(store, query="", page_type=None, category=None, offset=0, limit=50
 
 
 def _preview_section(frozen, page, section):
-    from .desktop import _literal
+    from .workspace_api import _literal
     prefix = f'<a id="{section.id}"></a>\n## {_literal(section.title)}\n\n'
     body = frozen.split(prefix, 1)[1]
     for following in page.sections[page.sections.index(section) + 1:]:
@@ -551,7 +551,7 @@ def _preview_section(frozen, page, section):
 
 
 def _preview_summary(frozen, page, revision):
-    from .desktop import _literal
+    from .workspace_api import _literal
     return frozen.split(f"<!-- {page.id}@{revision} -->", 1)[0].removeprefix(f"# {_literal(page.title)}\n\n").strip()
 
 

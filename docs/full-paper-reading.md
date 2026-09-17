@@ -15,15 +15,14 @@ Popplerの`pdfinfo`、`pdftotext`、`pdftoppm`をPATHに置きます。Windows�
 winget install --id oschwartz10612.Poppler --exact
 ```
 
-インストール後はBukanとターミナルを再起動します。既に導入済みなら再インストールは不要です。
-新しいツールはアプリを再ビルドした後の文献管理MCPから利用できます。CLIだけでも同じMCPを起動できます。
+インストール後はMCPホストとターミナルを再起動し、新しいPATHを読み込みます。既に導入済みなら再インストールは不要です。
+配布物のCLIから文献管理MCPを起動できます。
 
 ```powershell
-cargo build --manifest-path src-tauri/Cargo.toml --bin bukan-cli
-./src-tauri/target/debug/bukan-cli.exe mcp C:/Research/my-workspace
+bukan mcp C:/Research/my-workspace
 ```
 
-`mcp`は標準入力からリクエストを待ちます。MCPクライアントには実行ファイルと`mcp`、Workspaceの絶対パスを登録してください。
+`mcp`は標準入力からリクエストを待ちます。`bukan mcp-config C:/Research/my-workspace --format toml`でクライアント用設定を表示できます。
 研究エンジンとは別のMCPです。文献検出・PDF取得はBukan、読解結果・知見・改訂の保存は研究エンジンが担当します。
 
 ## 文献は保存済みライブラリから探す
@@ -53,7 +52,7 @@ cargo build --manifest-path src-tauri/Cargo.toml --bin bukan-cli
 文献ごとの作業フォルダで読解・図表の切り出しを進めます。重要な図表はノートへプレビューを埋め込み、PDFページと図表番号を添えます。
 登録前に画像を研究用の永続フォルダへコピーし、一時キャッシュの削除でプレビューが消えないようにします。
 書き出したMarkdownには文書配下の画像を同梱し、数式は独立した`$$`ブロックにします。
-保存後にユーザーの対象プレビューで図と数式を確認します。全ページの読解記録と、科学的な点検・表示確認は別に残します。
+保存後にVS Codeなどユーザーの対象Markdownプレビューで図と数式を確認し、原PDFはPDFビューアーで照合します。全ページの読解記録と、科学的な点検・表示確認は別に残します。
 
 ページ番号は表紙・参考文献・付録も含むPDFファイルの1始まりの番号です。印刷ページ番号とは区別します。
 取得ツールは`reviewStatus: not_assessed_by_retrieval`を返し、読了を自動判定しません。

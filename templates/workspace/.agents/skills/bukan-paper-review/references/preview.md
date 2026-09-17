@@ -38,10 +38,11 @@ rejected. An unsupported form needs a deliberate authored-note revision.
 
 ## Verify the final saved artifact
 
-Open the final saved note or export in the user's target application. For Bukan
-wiki work, check the relevant app view; for delivered Markdown, check VS Code's
-standard preview when that is the requested target. A diagnostic HTML renderer
-can investigate a problem but cannot certify a different application.
+Open the final saved note or wiki export in the user's target Markdown preview;
+use VS Code's standard preview when that is the requested target. Inspect original
+figures and equations in a PDF viewer or readable exact-version page images.
+No Bukan GUI check is required. A diagnostic HTML renderer can investigate a
+problem but cannot certify a different target application.
 
 Check that every embedded image loads with nonzero intrinsic dimensions, then
 visually inspect readability, cropping, captions and correspondence to the source.

@@ -1,10 +1,12 @@
 # Bukan Research prototype
 
 文献の主張・条件・根拠・発展関係を蓄積し、研究上の問いを改訂するための試作です。
-BukanのGUIやRust内部型に依存しないPythonパッケージで、CLI、stdio MCP、デスクトップ用JSON窓口から同じSQLiteストアを使います。
+Rust内部型に依存しないPythonパッケージで、CLI、stdio MCP、汎用JSON窓口から同じSQLiteストアを使います。
 文献の読解と関係の判断はAIクライアントが担当します。このパッケージはLLM呼び出しや自動サーベイを実行しません。
 
 ## 起動
+
+通常の利用では、配布物の`bukan setup <workspace>`で初期化済みワークスペースの研究環境を準備し、`bukan research <workspace> -- <engine args>`または`bukan research-mcp <workspace>`から実行します。[利用ガイド](../docs/usage.md)を参照してください。
 
 Python 3.11以上とuvを使います。以下はリポジトリのルートから実行する例です。
 ストアは所有ホストのローカルディスク上に置きます。
@@ -33,14 +35,13 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 }
 ```
 
-上記JSONはBukan外のMCPクライアント向けの例です。Bukanアプリから使う場合は、研究ホームで研究エンジンを接続し、
-同じワークスペースの研究DBをアプリ内Codexにも渡します。
+上記JSONは研究エンジンを直接起動する開発用の例です。配布物から使う場合は、`bukan mcp-config <workspace>`が文献管理MCPと研究MCPの設定を表示します。クライアントのグローバル設定は変更しません。
 既存Bukanとのstdio連携を試すため、公式MCP Python SDKの1.x保守系列を指定し、実際の依存版を`uv.lock`で固定しています。
 
-## デスクトップ用JSON窓口
+## CLI・MCPで使うJSON窓口
 
-`bukan-research --store PATH desktop`は標準入力からJSONを1件読み、結果を標準出力へ返して終了します。
-これはBukanの研究ホームが使う窓口で、MCPと同じStoreを使用します。研究DBの初期化は`init`で別に行い、
+`bukan-research --store PATH request`は標準入力からJSONを1件読み、結果を標準出力へ返して終了します。
+`bukan research <workspace> -- request`からも呼べます。実装は`workspace_api.py`にあり、MCPと同じStoreを使用します。旧`desktop`コマンドとモジュールは互換用に残しています。研究DBの初期化は`init`で別に行い、
 `summary`を呼んだだけではDBを作成・更新しません。通信形式は`version: 1`です。
 
 | `operation` | 入力 | 結果 |
@@ -72,7 +73,7 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 
 ## 保存するデータ
 
-新規ストアの形式は2です。形式1の既存ストアは読み取りできますが、書き込み前に`migrate`を実行します。移行はDBの隣の`backups/`にSQLiteバックアップを作り、既存のレコード本文・ID・改訂を保持します。通常の参照や`init`だけでは移行しません。デスクトップ通信の`version: 1`はDB形式とは別です。
+新規ストアの形式は2です。形式1の既存ストアは読み取りできますが、書き込み前に`migrate`を実行します。移行はDBの隣の`backups/`にSQLiteバックアップを作り、既存のレコード本文・ID・改訂を保持します。通常の参照や`init`だけでは移行しません。JSON通信の`version: 1`はDB形式とは別です。
 
 | 型 | 内容 |
 |---|---|
@@ -127,7 +128,7 @@ uv run --project research-engine bukan-research --store C:/Research/topic/data/r
 | `trace_record` | テーマ・問いから主張、抜粋、原資料へ遡る |
 | `get_history` | 判断の改訂履歴を読む |
 | `store_info` | 保存件数と形式の版を確認する |
-| `research_wiki_request` | デスクトップと同じ`operation`でwikiの検索・表示・改訂・作業を扱う。上の操作表を参照 |
+| `research_wiki_request` | JSON窓口と同じ`operation`でwikiの検索・表示・改訂・作業を扱う。上の操作表を参照 |
 | `export_wiki_page` | wikiの固定改訂を、保存時の画像とともに書き出す |
 | `get_paper_note` | 現在または指定改訂のMarkdownノートと、ページごとの読解状況を取得する |
 | `export_paper_note` | DBの隣の`paper-notes/`へ改訂ごとのMarkdownと画像のコピーを出力する。既存ファイルの編集は上書きしない |
@@ -178,7 +179,7 @@ PDFが変わった場合は別のSourceへ参照を変え、以前の読解状�
 ノートで候補を絞った後は、重要な主張を引用元のPDFで確認します。
 
 Markdownの出力は改訂ごとのスナップショットです。DBを更新すると新しい改訂を出力でき、以前のファイルは残ります。
-出力したMarkdownを直接編集してもDBの検索には自動反映されません。アプリの文献ノート編集、または
+出力したMarkdownを直接編集してもDBの検索には自動反映されません。JSON窓口の`save-note`、または
 `paper_note.markdown`への取り込みと`expected_revision`を指定した保存を使ってください。
 ファイル監視や双方向同期は行いません。
 
@@ -221,7 +222,7 @@ uv run --project research-engine bukan-research --store C:/Research/shared/resea
 年表と取得状況は外部ワークスペースのMarkdown・JSON・BibTeXに保存し、研究MCPには
 根拠付きのノートと研究史の入口となるTopicを登録します。これらのファイルの自動取り込みはありません。
 
-文献検出・索引は既存Rustコアが担当します。`bukan-cli scan --json`やBukan MCPから取得した書誌を、
+文献検出・索引はRustコアが担当します。`bukan scan --json`やBukan MCPから取得した書誌を、
 `adapters.paper_from_bukan`で変換します。アダプターはPDFを開かず、Bukanへの書き戻しもしません。
 研究データの保存先として、Paperpile配下とBukanソース配下を拒否します。
 

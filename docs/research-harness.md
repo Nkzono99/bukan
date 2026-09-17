@@ -3,7 +3,8 @@
 Bukan separates persistent research facts and deterministic record checks from
 the agent's scientific work. Workspace instructions provide the source boundaries
 and route a task to the relevant research mode. The host coordinates reading,
-audits and integration; the app and MCPs make the resulting work inspectable.
+audits and integration; the CLI and MCPs expose records, and Markdown/PDF viewers
+make the resulting work inspectable.
 
 This organization follows OpenAI's recommendation to keep skill descriptions
 specific, disclose task guidance progressively, remove unnecessary document loads
@@ -103,10 +104,13 @@ an answer key or the suspected failure in the worker prompt.
 | Continue a survey with an acquired batch and unexpanded references | Integrates accepted evidence, expands cited and non-citing work, and keeps unfinished search/audit work visible |
 | Locate a needed paper after a Drive hydration failure | Distinguishes an unavailable local check from non-ownership, follows legitimate alternatives, updates matching Bib/Markdown/JSON candidates |
 
-For target GUI QA, open the final Bukan page and requested VS Code Markdown
-preview. Inspect every embedded image and all new/changed equations, follow
+For target-preview QA, open the final saved note/wiki export in the requested
+VS Code Markdown preview or other chosen application. Inspect original pages
+in a PDF viewer or readable exact-version page images. Inspect every embedded
+image and all new/changed equations, follow
 representative pinned evidence links, and verify a copied portable bundle. Syntax
 tests or a substitute renderer do not establish this result. Record the checked
 application/artifact revision and leave inaccessible targets explicitly unverified.
+A Bukan desktop GUI is not part of this acceptance check.
 Keep forward-test observations separate from model-wide accuracy, price or speed
 claims; a small trial cannot establish those comparisons.

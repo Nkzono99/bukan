@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "bukan-library": {
+      "command": "bukan",
+      "args": ["mcp"]
+    },
+    "bukan-research": {
+      "command": "bukan",
+      "args": ["research-mcp"]
+    }
+  }
+}

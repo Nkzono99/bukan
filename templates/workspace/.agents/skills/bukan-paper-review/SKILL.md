@@ -10,6 +10,10 @@ interpretations. Follow the workspace's source and revision boundaries and the
 user's requested scope. This skill does not apply to Bukan application development
 or unrelated Markdown editing.
 
+Use the connected CLI/MCP workspace and its existing records. Read exported notes
+and wiki pages in VS Code or the user's chosen Markdown preview, and inspect
+original pages in a PDF viewer. No Bukan desktop application is required.
+
 ## Choose the needed mode
 
 | Task | Read |

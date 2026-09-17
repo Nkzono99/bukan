@@ -8,27 +8,41 @@ Tool names below omit host-specific prefixes.
 ## Two MCPs, one research store
 
 The literature MCP uses Bukan's read-only mounted Paperpile index and PDF access.
-The research MCP stores analysis in `data/research.sqlite`, also used by the app
-through `BUKAN_RESEARCH_STORE`. The host selects models and runs workers; the
+The research MCP stores analysis in `data/research.sqlite`, also used by
+`bukan research <workspace> -- <engine args>`. The host selects models and runs workers; the
 engine does not run an LLM, crawler, scheduler or autonomous background research.
-Saving an app request does not start a worker.
+Saving a task does not start a worker.
 
-For saved requests, `.bukan/current-research.md` (`BUKAN_RESEARCH_FILE`) points to
-the task and records; durable copies are in `queries/requests/`. For a selected
-paper, `.bukan/current-context.md` or `get_current_paper` provides context.
-`BUKAN_PAPERPILE_ROOT` is the mounted library, always read-only. Generated files
-belong in this research workspace, outside the application checkout and Paperpile.
+`bukan setup <workspace> --default` prepares an initialized workspace and can
+bind it as Bukan's default. Workspace selection is explicit path, then
+`BUKAN_WORKSPACE`, then Bukan's saved default; the current directory is not a
+fallback. `bukan mcp-config <workspace> --format toml` prints the library and
+research MCP configuration without changing the host's global settings.
+
+Read the requested records and tasks directly through the MCP. Earlier saved
+requests under `queries/requests/` remain useful context. Legacy
+`.bukan/current-research.md` and `.bukan/current-context.md` files may be retained,
+but are not automatically refreshed by the CLI. Resolve a paper through its ID
+or metadata rather than assuming a GUI selection. Generated files belong in this
+research workspace, outside the application checkout and read-only Paperpile.
 
 ## Library and PDF operations
 
 | Tool | Use |
 | --- | --- |
+| `workspace_context` | Confirm the bound workspace and Paperpile source, including an unavailable source, before research |
 | `search_library`, `list_collections` | Search title, authors, year, filename and collection in the read-only index before manually scanning folders |
-| `get_paper(paperId)`, `get_current_paper()` | Resolve library metadata and selected-paper context |
+| `get_paper(paperId)` | Resolve library metadata for the requested paper |
 | `get_paper_document(paperId)` | Retrieve the actual PDF's SHA-256 and total PDF file page count |
 | `read_paper_pages(paperId, sha256, startPage, pageCount)` | Read pinned page text; start at 1 and follow `nextPage` until null for a full read |
 | `read_paper_page_image(paperId, sha256, page)` | Inspect a pinned page image; use higher-resolution local inspection if details cannot be read |
-| `present_paper_list` | Show a useful search/comparison/collection list beside Codex; temporary and not a Paperpile write |
+| `present_paper_list` | Save a structured list to workspace `.bukan/paper-list.json`; returns the saved list and path |
+| `get_paper_list`, `persist_paper_list(destination)` | Read the saved list or export it to `reports` (Markdown) or `candidates` (JSON) |
+
+`get_current_paper` and `get_current_review` remain compatibility tools for old
+context files; they do not track a viewer selection in this workflow. Use explicit
+IDs for current research. List saving writes only the research workspace, never
+Paperpile. `clear_paper_list` clears the saved current list.
 
 PDF tools need Poppler on PATH. They can trigger Drive hydration but do not modify
 originals. Page batches are 1–10 pages and page images have a maximum dimension of
@@ -93,6 +107,10 @@ reset to `pending`, clear `worker`, `problem`, `result_note`, and set the curren
 `note_revision`. Preserve and merge concurrent human edits before replanning.
 
 ## Wiki updates and asset export
+
+The CLI accepts the same operation envelope on stdin through
+`bukan research <workspace> -- request`. The lower-level command is
+`bukan-research --store PATH request`; `desktop` is a compatibility alias.
 
 `research_wiki_request` exposes `request` as a generic object in its MCP input
 schema, not a discriminated per-operation schema. Its tool description summarizes
@@ -180,8 +198,9 @@ tools `create_review`, `list_reviews`, `get_review`, `get_current_review` and
 paper IDs and exact locators, for example `[@paper-id, p. 12]`.
 `attach_review_figure` copies an image extracted into this workspace into the
 review and records provenance; supply `sourcePaperId` and `page` with its caption.
-It does not copy anything back into Paperpile. The user can save presented lists
-to `reports/codex-lists/` or `candidates/codex-lists/` from the Viewer.
+It does not copy anything back into Paperpile. Existing saved lists under
+`reports/codex-lists/` or `candidates/codex-lists/` remain workspace artifacts;
+new useful search results can be saved directly to workspace reports/candidates.
 
 Use hierarchical `Bukan/` folders for fields/topics/objects/missions/projects and
 flat `bukan:` labels for methods/types/status/keywords in organization proposals.

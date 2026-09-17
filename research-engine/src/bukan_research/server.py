@@ -56,7 +56,7 @@ def create_server(store: Store) -> FastMCP:
 
     @server.tool()
     def research_wiki_request(request: dict) -> dict:
-        """Use the version-1 wiki API shared with the desktop.
+        """Use the version-1 wiki API shared with the CLI request command.
 
         Read: operation wiki-status, wiki-home(query/pageType/category/offset/limit),
         get(id/revision). Write: migrate (explicit SQLite backup), wiki-refresh,
@@ -69,7 +69,7 @@ def create_server(store: Store) -> FastMCP:
         Full structured basis and metadata edits use put_records with kind wiki_page.
         Navigation uses current page IDs; basis always pins a record revision.
         """
-        from .desktop import handle_request
+        from .workspace_api import handle_request
         return handle_request(store, request, author="ai-client")
 
     @server.tool()

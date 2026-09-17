@@ -29,8 +29,17 @@ def validate_store_path(path: Path) -> Path:
     ):
         raise ValueError("The research store must be outside Paperpile.")
     for parent in (path, *path.parents):
-        if (parent / "src-tauri" / "Cargo.toml").is_file():
+        if any((parent / marker).is_file() for marker in ("crates/bukan/Cargo.toml", "src-tauri/Cargo.toml")):
             raise ValueError("Research data must be outside the Bukan source repository.")
+        manifest = parent / ".codex-plugin" / "plugin.json"
+        if manifest.is_file():
+            try:
+                metadata = json.loads(manifest.read_text(encoding="utf-8-sig"))
+            except (OSError, ValueError):
+                continue
+            name = metadata.get("name") if isinstance(metadata, dict) else None
+            if isinstance(name, str) and name.lower() == "bukan":
+                raise ValueError("Research data must be outside the Bukan plugin distribution.")
     return path
 
 

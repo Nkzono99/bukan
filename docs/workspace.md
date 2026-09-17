@@ -1,7 +1,6 @@
 # Bukan workspace format
 
-Bukan のアプリケーション本体と研究データは別々に管理します。ワークスペースは
-`bukan init <path>` またはデスクトップアプリから初期化します。
+Bukan本体と研究データは別々に管理します。新しい研究ワークスペースは`bukan init <path>`で作り、`bukan setup <path>`で研究実行環境と未作成のDBを準備します。既存ワークスペースは同じ場所で使い続けます。
 
 ```text
 my-research/
@@ -14,108 +13,80 @@ my-research/
 ├── data/
 │   ├── paperpile.bib      # Paperpile BibTeXなどの読み取り用索引
 │   ├── collections.json   # Workspace独自のコレクションと文献割り当て
-│   ├── research.sqlite    # 研究エンジンの構造化記録（初回利用時に作成）
+│   ├── research.sqlite    # 研究エンジンの構造化記録
 │   ├── wiki/              # 研究wikiの改訂出力と固定した参照資料
 │   ├── wiki-assets/       # wikiへ取り込む画像
 │   ├── paper-notes/       # 文献ノートの改訂スナップショットと図表
 │   └── note-assets/       # 永続保存した原図・表のプレビュー
-├── notes/                 # 文献ノート
-├── queries/               # 再現可能な検索条件
-├── candidates/            # Paperpileへ未登録の候補
-├── reports/               # 検索レポート、エビデンス表、継続レビュー
-├── imports/               # Paperpileへ戻すファイル
-├── .bukan/                # ViewerとCodexの一時コンテキスト（Git対象外）
+├── notes/                 # 独立した文献ノート
+├── queries/               # 再現可能な検索条件・保存済み依頼
+├── candidates/            # Paperpileへ未登録の候補・未取得台帳
+├── reports/               # レポート、比較資料、既存の継続レビュー
+├── imports/               # 承認済みのインポート用ファイル
+├── .bukan/                # 旧コンテキスト等（Git対象外）
 └── cache/                 # 再生成可能な索引・抽出テキスト（Git対象外）
 ```
 
-研究用SKILLは新規ワークスペースへ同梱します。既存のカスタムファイルを上書きせず、
-初期化済みワークスペースを開くだけでは指示文を更新しません。配布元と更新時の比較・保全は
-[研究ハーネスの方針](research-harness.md)を参照してください。
+研究用SKILLは新規ワークスペースへ同梱します。既存のカスタムファイルを上書きせず、初期化済みワークスペースを使うだけでは指示文を更新しません。配布元と更新時の比較・保全は[研究ハーネス](research-harness.md)を参照してください。
 
-## Paperpileとの境界
+## Paperpileは読み取り専用にする
 
-- `bukan.toml` の `paperpile.path = "auto"` はマウント済みドライブを探索します。
-- 絶対パスを指定すれば、ワークスペース単位で異なる同期先を使用できます。
-- Paperpile の同期フォルダは常に読み取り専用です。
-- PDFを移動・改名せず、タグ提案・ノート・分析結果だけをワークスペースへ保存します。
-- ViewerではPaperpile由来の階層を`Paperpile / All`、独自分類を`Workspace / All`として
-  分けて表示します。
-- `data/collections.json`がまだない初回だけ、Paperpileのコレクション階層と割り当てを
-  Workspaceへ複製します。以後のPaperpile再索引ではこのファイルを上書きしません。
-- Workspaceコレクションの作成・割り当て変更は`data/collections.json`だけを更新し、
-  Paperpile側のコレクションやPDFには書き込みません。
+`bukan.toml`の`paperpile.path = "auto"`はマウント済みドライブを探索します。絶対パスを指定すれば、ワークスペースごとに同期先を選べます。PDFの移動・改名・削除は行わず、分類案、ノート、分析結果をワークスペースへ保存します。自動出力された`data/paperpile.bib`も編集しません。
 
-## Codexターミナル
+`data/collections.json`がない状態で最初に`collection create`を実行すると、Paperpileのコレクション階層と割り当てをWorkspaceへ複製してから独自分類を追加します。初回はPaperpileへの接続が必要です。`collection list`は読み取り専用で、初期化前は空の一覧を返します。以後の再索引では上書きせず、保存済みの独自分類はPaperpileが未接続でも編集できます。独自分類の作成・割り当て変更はこのファイルだけを更新します。
 
-研究ホームの利用手順は[アプリで研究を進める](app-research.md)を参照してください。
-研究環境を準備すると、アプリの検索・編集と研究MCPが同じ`data/research.sqlite`を使います。
-Pythonと依存パッケージはAppDataへ保存し、研究フォルダには置きません。
-保存した調査依頼は`queries/requests/`へ蓄積します。最新の依頼と資料への参照は
-`.bukan/current-research.md`と`BUKAN_RESEARCH_FILE`を通してCodexへ引き継ぎます。
-準備済みの場合、起動時に文献管理MCPと研究MCPの両方をセッションへ登録します。
-研究エンジンはCLIの同梱ソースを使うため、インストール後に開発リポジトリは不要です。
+```powershell
+bukan collection list C:/Research/my-workspace
+bukan collection create 比較対象 C:/Research/my-workspace
+bukan collection add 比較対象 p2-example C:/Research/my-workspace
+```
 
-Bukanデスクトップアプリは、ワークスペースをカレントディレクトリにしたPowerShell
-PTYを埋め込み、その中でCodex CLIをバックグラウンド起動します。PowerShell 7を優先し、見つからない
-場合はWindows PowerShellを使用します。表示されるのはCodexの生のTUIであり、
-Bukan独自のチャットUIへ変換しません。起動中もライブラリとPDFを操作でき、
-Codex終了後はPowerShellプロンプトへ戻ります。
+最後の例の`p2-example`は実際の文献IDへ置き換えます。独自分類はPaperpileへ書き戻しません。
 
-起動時は `workspace-write` サンドボックスと `on-request` 承認を明示します。
-Paperpile同期フォルダを追加の書き込み可能ディレクトリには設定しません。
-同期先が接続されている場合、読み取り元は`BUKAN_PAPERPILE_ROOT`、読み取り専用境界は
-`BUKAN_PAPERPILE_READ_ONLY=true`としてCodexプロセスへ渡します。
-未接続でも保存済みの研究は開けます。研究DBの場所は`BUKAN_RESEARCH_STORE`で渡します。
+## CLIと2つのMCPが同じ研究を参照する
 
-Viewerから文献をCodexコンテキストへ設定すると、
-`.bukan/current-context.md` に現在の文献ID、タイトル、コレクション、読み取り専用PDF
-への参照が保存されます。このファイルはセッション用で、Gitには含めません。
+使い方は[利用ガイド](usage.md)を参照してください。`bukan research <path> -- <engine args>`と`bukan research-mcp <path>`は、指定したワークスペースの`data/research.sqlite`を使います。文献管理MCPは`bukan mcp <path>`で起動します。
 
-Codex起動時にはBukan自身がstdio MCPサーバーとしてセッション限定で登録されます。
-`search_library`、`list_collections`、`get_paper`、`get_current_paper`は、
-Viewerと同じ索引を読み取り専用で参照します。書誌ファイル名とサイズに基づく
-安定IDを返すため、Paperpile側でコレクションが変わっても同じPDFを追跡できます。
-索引作成時にPDF本文は開かず、Google Driveのオンデマンドファイルを実体化しません。
+ワークスペースの解決順はコマンドの明示パス、`BUKAN_WORKSPACE`、Bukanの既定設定です。カレントディレクトリは使いません。既定設定を保存してもCodexのグローバル設定は変更しません。`bukan mcp-config <path>`で接続設定だけを表示できます。
 
-Codexは`present_paper_list`を呼び、検索・比較・選定した文献を構造化リストとして
-Viewerへ表示できます。リストは`%LOCALAPPDATA%\Bukan\bridge\`の一時状態であり、
-PaperpileおよびGoogle Drive Workspaceには自動で書き込みません。`clear_paper_list`
-またはGUIの「消去」で削除できます。利用者が保存ボタンを押した場合だけ、
-Markdownレポートを`reports/codex-lists/`、JSON候補を
-`candidates/codex-lists/`へ新規ファイルとして保存します。
+研究エンジンの実行環境はBukanのキャッシュへ保存し、研究フォルダには置きません。配布物が研究エンジンを含むため、インストール後に開発リポジトリは不要です。Paperpileが未接続でも保存済みの研究を参照できますが、原PDFの取得には同期先が必要です。
 
-## 継続レビュー
+研究対象はMCPで題名やIDから探し、必要な現行記録・固定根拠・作業を取得します。旧`queries/requests/`や`.bukan/current-*.md`を再開資料として保持できますが、CLIは旧GUIの選択状態を更新しません。一時コンテキストのコピーは研究の前提にしません。
 
-テーマ別のレビューは`reports/reviews/<review-id>/`へ保存します。
+## DBの改訂と画像を一緒に保つ
+
+新しい研究DBは形式2です。形式1も参照できますが、書き込み前に`bukan research <path> -- migrate`を明示して移行します。SQLiteバックアップを作り、元のID・本文・改訂を保持します。`setup`は既存DBを自動移行しません。
+
+ノートとwikiはDBの現在版を改訂し、閲覧時に固定版のMarkdownを書き出します。重要な図表は画像として埋め込み、出力文書の配下へ必要な画像を同梱します。出力が返す`path`をVS Codeで開いてプレビューを確認します。原資料はPDFビューアーで照合します。
+
+書き出したMarkdownへの手修正はDBに自動反映されません。元の改訂と差分を確認し、研究MCPまたはCLIの`request`を通して新しい改訂へ取り込みます。既存の出力、図表、人間の追記を黙って上書きしません。
+
+## 既存の継続レビューを保持する
+
+従来のテーマ別レビューも引き続き次の場所に保存できます。
 
 ```text
 reports/reviews/<review-id>/
-├── article.md             # AppとCodexが更新する現在の本文
+├── article.md             # 現在の本文
 ├── review.json            # テーマ、改訂番号、引用、図の出典
-├── figures/               # Workspace内で抽出後、出典付きで複製した画像
+├── figures/               # Workspaceで抽出後、出典付きで複製した画像
 └── history/               # 更新前のMarkdownスナップショット
 ```
 
-Appでレビューを選ぶと`.bukan/current-review.md`が更新され、Codexは
-`get_current_review`、`get_review`、`update_review`を使って同じテーマを継続的に
-改訂できます。重要な主張にはBukan文献IDとPDFページ・節を記録します。
-画像はPaperpileのPDFへ書き戻さず、Workspace内に抽出したファイルだけを
-`attach_review_figure`で複製し、元論文IDとページ番号を保持します。
+`list_reviews`、`get_review`、`update_review`でIDを指定して扱います。重要な主張には文献IDとPDFページ・節を記録します。`attach_review_figure`はWorkspaceへ抽出した画像だけを複製し、元論文IDとページ番号を保持します。Paperpileへの書き戻しは行いません。
 
-## 整理モデル
+旧`reports/codex-lists/`と`candidates/codex-lists/`も成果物として保持します。これらのファイルや通常のMarkdownが、研究DBへ自動取り込みされるわけではありません。
 
-Paperpile のフォルダは階層化でき、ラベルはフラットです。そのため Bukan は、
-階層が必要な分野・トピック・対象・ミッション・プロジェクトを `Bukan/` 以下の
-フォルダとして、横断的な方法・文献種別・状態・キーワードを接頭辞付きラベルとして
-扱います。
+## 分類案を確認して保存する
+
+分野・トピック・対象・ミッション・プロジェクトは階層を持つ`Bukan/`フォルダ、方法・文献種別・状態・キーワードは平坦な`bukan:`ラベルとして提案します。同じ文献を複数の分類へ割り当てられます。
 
 ```text
-Bukan/
-├── 分野/
-├── トピック/
-├── 対象/
-├── ミッション/
-└── プロジェクト/
+Bukan/分野/
+Bukan/トピック/
+Bukan/対象/
+Bukan/ミッション/
+Bukan/プロジェクト/
 
 bukan:method:PIC
 bukan:type:review
@@ -123,18 +94,10 @@ bukan:status:要確認
 bukan:keyword:lunar-dust
 ```
 
-同じ文献は複数フォルダおよび複数ラベルへ所属できます。生成された整理案は、
-Paperpile の公式APIが利用可能になるまで適用計画として保存します。
-
-## 整理計画の生成
-
-`taxonomy.toml` の `folder_rules` と `label_rules` は、タイトル、ファイル名、既存の
-Paperpileコレクション名に照合する用語を定義します。
+`taxonomy.toml`の`folder_rules`と`label_rules`は、タイトル・ファイル名・既存コレクション名に照合する用語を定義します。
 
 ```powershell
-bukan organize suggest D:\Research\my-workspace
+bukan organize suggest C:/Research/my-workspace
 ```
 
-結果は既定で `reports/bukan-organization-plan.json` に保存されます。候補がない文献は
-`bukan:status:未整理`、候補がある文献も適用前は `bukan:status:要確認` になります。
-ルールベースの分類は本文の意味を保証しないため、自動確定には使用しません。
+結果は既定で`reports/bukan-organization-plan.json`へ保存します。候補がない文献は`bukan:status:未整理`、候補がある文献も適用前は`bukan:status:要確認`になります。ルールの一致は本文の意味を保証しないため、案を確認してから別途承認した方法で適用します。

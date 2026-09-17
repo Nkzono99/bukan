@@ -1,170 +1,82 @@
 # Bukan
 
-Bukanは、文献の検索・PDF閲覧、研究ノートと根拠の蓄積、Codexへの調査依頼を
-一つの画面から行うCLIとTauriデスクトップアプリです。PaperpileがGoogle Driveへ
-同期したPDFは読み取り専用で扱います。このリポジトリはBukan本体だけを管理し、
-ノートや検索結果などの研究データは `bukan init` で作る外部ワークスペースへ分離します。
+Bukanは、Paperpileの文献を読み取り専用で検索・読解し、研究ノート、主張と根拠、研究wikiを外部ワークスペースに蓄積するCLIとMCPです。Codexから調査を進め、成果物はVS CodeのMarkdownプレビュー、原資料はPDFビューアーで確認します。
 
-日々の利用手順は[アプリで研究を進める](docs/app-research.md)を参照してください。
-追加サーベイで同じ項目の解析・解釈を更新していく構成は、[研究wikiの設計と実装範囲](docs/research-wiki.md)にまとめています。
+利用手順は[CLI・MCPで研究を進める](docs/usage.md)、保存形式は[ワークスペース仕様](docs/workspace.md)を参照してください。既存の研究フォルダ、DB、ノート、wikiをそのまま使います。
 
-## 現在できること
+## 研究を始める
 
-- 研究wikiから既存の研究を開く、新しい研究を作る、研究実行環境を準備する
-- wikiの項目・別名・分類・本文を検索し、節ごとの編集、採用した根拠、改訂履歴を確認する
-- 根拠の改訂から再検討作業を作り、まだ統合されていない研究記録を候補として保持する
-- 既存の形式1の研究DBを、SQLiteバックアップを作成して形式2へ移行する
-- 研究DBの問い・文献ノート・主張・根拠・関係・作業記録を検索し、参照先をたどる
-- Markdownレポートと文献ノートを数式・図表付きで表示し、改訂・競合検出付きで編集する
-- 調査依頼と閲覧中の資料を保存し、同じ画面のCodexへ引き継ぐ
-- Windows の全ドライブから `マイドライブ/Paperpile` または
-  `My Drive/Paperpile` を自動検出
-- `All Papers` 以下をコレクションとして索引化
-- `Paperpile / All` と `Workspace / All` を分離し、初回だけPaperpileの階層をWorkspaceへ複製
-- Workspace側のコレクション作成・文献割り当て（Paperpileには書き戻さない）
-- 書誌ファイル名とサイズに基づく安定IDで、コレクション間の同一文献を統合
-- `Starred Papers` と照合
-- タイトル、著者、年、コレクションの横断検索
-- コレクション、スター、更新日、タイトル、出版年による絞り込み・並び替え
-- PDF のアプリ内表示（選択状態と目次を再描画時も保持）、既定アプリでの表示、エクスプローラーでの表示
-- 検出できない場合の手動フォルダ選択
-- 外部ワークスペースの初期化・診断・全件走査
-- 開いている外部ワークスペースを VS Code で起動
-- App内のPowerShell PTYでCodex TUIを非同期起動（PaperpileごとのApp管理作業領域、`workspace-write`）
-- Viewerで選択中の文献をCodexの作業コンテキストへ設定
-- CodexがMCPで提示した一時文献リストをViewerへ即時表示
-- MCPからPaperpile索引・コレクション・現在の論文を読み取り専用で参照
-- 一時文献リストを明示操作でWorkspaceのレポートまたは候補へ保存
-- テーマ別の継続レビューをMarkdown・構造化引用・出典付き図・改訂履歴として蓄積
-- Appで継続レビューを閲覧・編集し、現在のレビューをCodexへ引き継いで更新
-- PaperpileのPDF追加・削除・移動を監視し、索引を自動更新
-- private GitHub Releaseを起動時に確認し、GUIから署名検証付きで更新
-- `taxonomy.toml` による `Bukan/` フォルダと `bukan:` ラベルの整理候補生成
-
-Paperpile 配下に対する書き込み・移動・削除操作は実装していません。
-
-## 開発
-
-文献間の発展関係と根拠を蓄積する独立パッケージは、
-[Bukan Research](research-engine/README.md)を参照してください。文献管理とは別のストアを使い、アプリ・CLI・MCPから操作できます。アプリにはエンジンの実行用ソースと依存関係のロックファイルを同梱します。
-全文レビューは文献別のサブエージェントへ割り当て、図表を埋め込んだノートと根拠を保存します。
-読了済みPDFの再利用、担当の重複防止、途中再開の手順は[並列レビュー](docs/parallel-review.md)にまとめています。
-
-必要環境は Node.js、Rust、Windows では WebView2 です。
+配布物の`bukan`を利用できる状態にして、研究ワークスペースを指定します。
 
 ```powershell
-npm install
-npm run desktop:dev
+bukan init C:/Research/my-workspace
+bukan setup C:/Research/my-workspace --default
+bukan doctor C:/Research/my-workspace
+bukan mcp-config C:/Research/my-workspace --format toml
 ```
 
-CLI を実行する場合:
+`init`は新しいワークスペースを作り、`setup`は研究実行環境と未作成の研究DBを準備します。既存ワークスペースでは`init`を省略し、同じ研究DBを使います。形式1のDBは自動移行しません。`mcp-config`は文献管理・研究の2つのMCP設定を表示し、Codexのグローバル設定は変更しません。
+
+| コマンド | 用途 |
+| --- | --- |
+| `bukan setup <workspace> [--default]` | 初期化済みワークスペースの研究環境を準備し、必要ならBukanの既定値を保存する |
+| `bukan research [workspace] -- <engine args>` | 同じ研究DBで検索・改訂・wiki出力などを実行する |
+| `bukan mcp [workspace]` | 読み取り専用の文献索引・PDF取得用MCPを起動する |
+| `bukan research-mcp [workspace]` | 研究記録を保存・検索するMCPを起動する |
+| `bukan mcp-config [workspace] [--format json\|toml]` | 2つのMCPを登録する設定を表示する |
+| `bukan init`, `detect`, `doctor`, `scan`, `organize` | ワークスペース作成、Paperpile検出、診断、索引化、分類案の生成 |
+
+省略したワークスペースは`BUKAN_WORKSPACE`、Bukanに保存した既定値の順で決めます。カレントディレクトリからは推測しません。複数の研究を扱うときは、コマンドにパスを明示してください。
+
+## できること
+
+- Paperpileの同期済み文献を、題名・著者・年・コレクションから検索する
+- PDFの版とSHA-256を固定し、ページ本文とページ画像を取得する
+- 全文読解ノート、条件付きのClaim、原文と一致するEvidence、論文間のRelationを保存する
+- wikiの同じページを改訂し、根拠の更新と未統合の記録を追跡する
+- 文献別の作業と現在の改訂を記録し、中断や同時編集から再開する
+- 数式と埋め込み図を含むMarkdownを、画像付きの改訂スナップショットとして出力する
+- 既存の継続レビュー、候補、整理計画を研究ワークスペースに保持する
+
+全ページの読解、科学的な独立点検、表示確認は別々に記録します。全文の自動取得や読了フラグだけでは、科学的な妥当性を保証しません。[研究ハーネス](docs/research-harness.md)が指示と検査の役割を、[並列レビュー](docs/parallel-review.md)が担当の配布と保存を定めます。
+
+Paperpileの同期領域には書き込みません。ノート、図表、検索条件、候補、レポートは研究ワークスペースに保存します。文献整理は適用案とインポート候補の生成までで、Paperpileへの登録・変更は別の操作です。
+
+## 開発する
+
+RustのCargo workspaceとPythonの[研究エンジン](research-engine/README.md)で構成します。Node.js、Tauri、WebView2は不要です。
 
 ```powershell
-cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- --help
-cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- init D:\Research\lunar-workspace
-cargo run --manifest-path src-tauri/Cargo.toml --bin bukan-cli -- organize suggest D:\Research\lunar-workspace
+cargo run -p bukan -- --help
+cargo build -p bukan --release --locked
+cargo test --workspace --locked
+uv run --project research-engine --locked pytest research-engine/tests -q
 ```
 
-または `npm run cli -- <command>` でも実行できます。
+```text
+crates/bukan/          CLI・文献索引・PDF・MCP・ワークスペース
+research-engine/      研究記録・wiki・stdio MCP
+templates/workspace/  研究ワークスペースと作業別SKILLの正本
+plugins/bukan/        Codexプラグインの配布定義
+docs/                 利用手順・保存形式・研究工程
+```
 
-フロントエンドのみをビルドする場合:
+Codexプラグインの配布・導入手順は[プラグインの説明](plugins/bukan/README.md)を参照してください。研究エンジンとSKILLを含む配布物を使い、利用者の研究データをアプリケーションのリポジトリやプラグインへコピーしません。
+
+Windowsの配布物をローカルで作る例です。Linuxでは実行ファイルを`target/release/bukan`、対象を`x86_64-unknown-linux-gnu`に替えます。
 
 ```powershell
-npm run build
+python scripts/package_release.py --binary target/release/bukan.exe --target x86_64-pc-windows-msvc --output-dir dist
 ```
 
-Rust のテスト:
+対応・配布対象はWindowsとLinuxです。GitHub Actionsは両環境用のzipを生成します。Releaseは下書きとして作り、公開は別途行います。macOSは現時点では動作保証の対象外です。
 
-```powershell
-cd src-tauri
-cargo test
-```
+## 研究工程を確認する
 
-マウント中の実ライブラリを走査する診断テスト:
+- [全文読解](docs/full-paper-reading.md)：正確なPDF版、ページ本文、図表・数式の確認
+- [網羅的な先行研究解析](docs/exhaustive-review.md)：引用・非引用の探索と終了条件
+- [研究wiki](docs/research-wiki.md)：現在の解釈、固定根拠、改訂と未統合候補
+- [情報の階層](docs/research-knowledge-layers.md)：原資料、読解記録、wiki、対話の役割
+- [モデルの使い分け](docs/review-model-routing.md)：担当の指定と独立した科学的点検
 
-```powershell
-cargo test reports_mounted_paperpile_library -- --ignored --nocapture
-```
-
-Windows インストーラーを生成する場合:
-
-```powershell
-npm run desktop:build
-```
-
-生成物は `src-tauri/target/release/bundle/` に出力されます。
-
-## リリース
-
-`package.json`、`src-tauri/tauri.conf.json`、`src-tauri/Cargo.toml` の
-バージョンを揃え、同じバージョンの `v` 付きタグを push すると、GitHub Actions が
-Windows 用の署名なし NSIS インストーラーをビルドし、Private GitHub Release へ
-添付します。同時にTauri Updater用の`latest.json`と署名を生成します。
-
-```powershell
-git tag vX.Y.Z
-git push origin vX.Y.Z
-```
-
-タグといずれかの設定ファイルのバージョンが一致しない場合、Release は作成されません。
-
-## アプリの更新
-
-Appは起動後にprivate GitHub Releaseを静かに確認し、新しいバージョンがある場合だけ
-更新ダイアログを表示します。Top barのバージョン表示またはコマンドパレットの
-「Bukanの更新を確認」から手動確認もできます。
-
-privateリポジトリへアクセスする認証は、次の順で自動検出します。
-
-1. AppがWindows Credential Managerへ保存したfine-grained token
-2. `BUKAN_GITHUB_TOKEN`、`GH_TOKEN`、`GITHUB_TOKEN`
-3. `gh auth login`済みのGitHub CLI
-
-tokenを使う場合は対象リポジトリを`Nkzono99/bukan`、リポジトリ権限を
-`Contents: Read-only`に限定できます。tokenはWorkspaceや設定ファイルへ保存しません。
-各認証候補はGitHub Releases APIで検証され、期限切れの保存済みtokenがあっても
-次の候補へフォールバックします。GitHub CLIの状態は`gh auth status -h github.com`で
-確認でき、無効な場合は`gh auth login -h github.com`で再認証してください。
-
-Updater署名鍵はGitHub Actionsの`TAURI_SIGNING_PRIVATE_KEY` secretへ登録済みです。
-ローカルバックアップは`%USERPROFILE%\.tauri\bukan-updater.key`、パスワードの
-Windows DPAPIバックアップは同じ場所の`bukan-updater.password.dpapi`です。この鍵を
-失うと、既存インストールへ同じ更新経路で配布できなくなるため、2ファイルを一緒に
-保持してください。これはアップデート検証用署名であり、Windowsコード署名証明書
-ではありません。
-
-## 外部ワークスペース
-
-`bukan init <path>` は指定先へ `bukan.toml`、分類体系、`AGENTS.md`、および
-`data/`, `notes/`, `queries/`, `candidates/`, `reports/`, `imports/`, `cache/`
-を生成します。研究用SKILLと作業別の参照文書も`.agents/skills/bukan-paper-review/`
-へ同梱します。ワークスペースは独立した Git リポジトリとして管理できます。
-
-形式と運用方針は [ワークスペース仕様](docs/workspace.md) を参照してください。
-SKILL・AGENTS・依頼文の役割と保守方針は[研究ハーネス](docs/research-harness.md)にまとめています。
-
-整理候補は `reports/bukan-organization-plan.json` に保存されます。初期ルールは
-タイトル・ファイル名・既存コレクションを根拠にするため、Paperpileへ反映する前に
-`要確認` の項目をレビューしてください。
-
-文献IDはPaperpileのファイル名から得られる書誌情報とファイルサイズから生成する
-`p2-...` 形式です。PDF本文を開かないためDriveのオンデマンドファイルを実体化せず、
-コレクション間を移動しても同じ文献を追跡できます。旧版のパス由来IDも
-`legacyId` として返すため、既存連携は段階的に移行できます。
-
-## 継続レビュー
-
-文献管理MCPは、同期先PDFの総ページ数・本文・ページ画像を読み取り専用で取得できます。
-全ページ読解の手順、Popplerの準備、CLIからの起動は[PDF読解の使い方](docs/full-paper-reading.md)を参照してください。
-
-CodexがBukan MCPの`create_review`でテーマを作ると、
-`reports/reviews/<review-id>/` に現在の本文`article.md`、構造化された引用情報
-`review.json`、過去の本文`history/`、出典付き画像`figures/`を保存します。
-Appはレビューの閲覧とMarkdown本文の直接編集に使い、「Codexで更新」を選ぶと対象が
-`.bukan/current-review.md`と`BUKAN_REVIEW_FILE`を通してCodexへ渡ります。
-
-CodexはBukan MCPの`search_library`、`get_paper`でローカル文献を確認し、
-`update_review`で本文と引用元の論文ID・ページまたは節を一緒に更新します。
-図を使う場合はPDFから抽出した画像をまずWorkspaceの`cache/`等へ保存し、
-`attach_review_figure`でレビューへ複製します。Paperpile内のPDFは常に読み取り専用で、
-図には元論文IDとページ番号を記録します。
+Paperpile全体の全文Markdown化は、このCLI移行とは別の作業です。既存の抽出資料と研究成果を保持し、変換の実行や完成をこの移行に含めません。

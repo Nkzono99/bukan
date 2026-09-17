@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 import sqlite3
 
@@ -121,17 +122,46 @@ def test_store_location_and_format_are_validated(tmp_path):
     (custom_library / "All Papers").mkdir(parents=True)
     with pytest.raises(ValueError, match="Paperpile"):
         Store(custom_library / "reports" / "store.sqlite")
-    repository = tmp_path / "repository"
-    (repository / "src-tauri").mkdir(parents=True)
-    (repository / "src-tauri/Cargo.toml").write_text("[package]")
-    with pytest.raises(ValueError, match="repository"):
-        Store(repository / "data/store.sqlite")
     path = tmp_path / "unknown.sqlite"
     with sqlite3.connect(path) as db:
         db.execute("PRAGMA user_version=999")
     with pytest.raises(ValueError, match="Unsupported"):
         Store(path).initialize()
     assert sqlite3.connect(path).execute("PRAGMA user_version").fetchone()[0] == 999
+
+
+@pytest.mark.parametrize("marker", ["crates/bukan/Cargo.toml", "src-tauri/Cargo.toml"])
+def test_store_rejects_source_repository_without_creating_data(tmp_path, marker):
+    repository = tmp_path / "repository"
+    manifest = repository / marker
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text("[package]", encoding="utf-8")
+    with pytest.raises(ValueError, match="source repository"):
+        Store(repository / "data" / "research.sqlite").initialize()
+    assert not (repository / "data").exists()
+
+
+@pytest.mark.parametrize("subdirectory, name", [("", "bukan"), ("data", "BUKAN"), ("skills/review/notes", "bukan")])
+def test_store_rejects_bukan_plugin_distribution_without_creating_data(tmp_path, subdirectory, name):
+    plugin = tmp_path / "plugin-cache" / "bukan-version"
+    manifest = plugin / ".codex-plugin" / "plugin.json"
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text(json.dumps({"name": name, "version": "0.1.0"}), encoding="utf-8")
+    target = plugin / subdirectory / "research.sqlite"
+    with pytest.raises(ValueError, match="plugin distribution"):
+        Store(target).initialize()
+    assert not target.exists()
+    assert list(plugin.iterdir()) == [manifest.parent]
+
+
+@pytest.mark.parametrize("metadata", [{"name": "other-plugin"}, [], {"description": "bukan"}])
+def test_store_allows_unrelated_plugin_directories(tmp_path, metadata):
+    manifest = tmp_path / ".codex-plugin" / "plugin.json"
+    manifest.parent.mkdir()
+    manifest.write_text(json.dumps(metadata), encoding="utf-8")
+    store = Store(tmp_path / "research.sqlite")
+    store.initialize()
+    assert store.info()["schema_version"] == 2
 
 
 def test_bukan_adapter_keeps_external_id_without_importing_bukan():

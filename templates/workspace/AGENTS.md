@@ -8,12 +8,13 @@ do not change global model configuration for a research assignment.
 
 - Paperpile is the source of truth for accepted references and PDFs. Never edit
   `data/paperpile.bib` or rename, move, delete, or modify synced Paperpile files.
-  `BUKAN_PAPERPILE_READ_ONLY=true` is a mandatory boundary.
+  This read-only boundary is unconditional; it does not depend on an environment flag.
 - Put candidate references in `candidates/` and approved import files in `imports/`.
   A candidate or workspace collection does not authorize a Paperpile write,
   import, or purchase.
-- The app and research MCP share `data/research.sqlite` (`BUKAN_RESEARCH_STORE`).
-  Reuse it for app requests. Wiki pages hold current interpretations; paper notes,
+- The CLI and research MCP share `data/research.sqlite`. Reuse this existing
+  store for research requests; do not create another research copy. Wiki pages
+  hold current interpretations; paper notes,
   Claims, exact Evidence, original PDFs and human notes remain reusable evidence.
   Generated prose is not independent primary evidence.
 - Preserve human edits, stable IDs and prior revisions. Read current records
@@ -34,11 +35,17 @@ do not change global model configuration for a research assignment.
 - For paper reviews, scientific audits, surveys, acquisition backlogs, or research
   note display repairs, use [.agents/skills/bukan-paper-review/SKILL.md](.agents/skills/bukan-paper-review/SKILL.md)
   and its relevant mode reference. Formatting-only work does not restart a review.
-- For a saved app request, read `.bukan/current-research.md` (`BUKAN_RESEARCH_FILE`)
-  and the records/documents it references. Durable request copies are under
-  `queries/requests/`. Inspect existing tasks and workers before resuming.
-- For "this paper", read `.bukan/current-context.md` when present or use
-  `get_current_paper`. Its PDF path is a read-only source.
+- Resolve the intended workspace explicitly through the CLI/MCP connection.
+  CLI precedence is the explicit path, `BUKAN_WORKSPACE`, then Bukan's saved
+  default; do not infer a workspace from the current directory. Call
+  `workspace_context` to confirm the connected workspace and Paperpile source
+  before research; an offline source does not mean the library is empty.
+- Read the requested wiki page, section, paper or saved task directly through
+  the MCP. Earlier requests under `queries/requests/` remain useful restart
+  records. Inspect existing tasks and workers before resuming.
+- For "this paper", resolve the named paper or ID through the library tools.
+  Any PDF path they return is a read-only source. Legacy context files, when
+  present, are prior context rather than an automatically current selection.
 - Use Bukan's library tools before manually scanning Paperpile. The skill's
   [tool reference](.agents/skills/bukan-paper-review/references/tools.md) explains
   the two MCPs, current record contracts, workspace paths and legacy reviews.
