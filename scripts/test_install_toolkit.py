@@ -470,7 +470,8 @@ class ToolkitInstallerTests(unittest.TestCase):
                                          str(bootstrap), *arguments],
                                         capture_output=True, text=True, timeout=30)
                 self.assertNotEqual(result.returncode, 0)
-                self.assertIn(expected, result.stdout + result.stderr)
+                # Windows PowerShell wraps Write-Error text according to host width.
+                self.assertIn(expected, " ".join((result.stdout + result.stderr).split()))
                 self.assertNotIn("Downloading", result.stdout + result.stderr)
                 self.assertEqual(self.snapshot(self.root), before)
 
