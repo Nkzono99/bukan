@@ -20,7 +20,9 @@ class PipLauncherTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="bukan-pip-launcher-")
         self.addCleanup(temporary.cleanup)
-        self.root = Path(temporary.name) / "日本語 profile with spaces"
+        # Windows runners may expose TEMP through an 8.3 alias; the launcher
+        # resolves its package location before constructing child commands.
+        self.root = Path(temporary.name).resolve() / "日本語 profile with spaces"
         self.package = self.root / "site-packages" / "bukan"
         self.bundle = self.package / "_bundle"
         self.bundle.mkdir(parents=True)
