@@ -36,7 +36,7 @@ Use 64-bit Python 3.11 or newer, Codex, and a locally available Paperpile sync
 folder. Choose the wheel for Windows or Linux x86_64. This is a Windows example:
 
 ```sh
-python -m pip install /path/to/bukan-0.2.2-py3-none-win_amd64.whl
+python -m pip install /path/to/bukan-0.3.0-py3-none-win_amd64.whl
 python -m bukan install
 ```
 
