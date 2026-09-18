@@ -14,8 +14,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
         json!({
             "name": "paperpile_import_references",
             "title": "Register references in Paperpile",
-            "description": "Register user-selected DOI/URL lines or BibTeX/RIS in personal My Library using dedicated Chrome, then reload and verify browser-local presence through Paperpile's duplicate preview. Paperpile is local-first: serverSyncVerified is false; do not claim server persistence or other-device availability. Requires one-time bukan paperpile login and installed Google Chrome. Keeps duplicate skipping enabled; never edits synced Drive files. Only My Library supported. BibTeX/RIS requires expectedCount; parsed-count mismatch aborts before import. Unknown outcome may have committed. PDF acquisition and Drive sync are separately unverified. Max 64 KiB, 100 references; small batches recommended.",
-            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true },
+            "description": "Register user-selected DOI/URL lines or BibTeX/RIS in My Library through dedicated Chrome, verify browser-local presence, then by default run Paperpile Auto update and Find PDFs online for uniquely matched references, including already-present ones. Paperpile extension must be installed in the dedicated profile for follow-up. Inspect per-reference postprocessing metadata/PDF results: registration success does not prove follow-up completion. postprocess=false registers only; previewOnly never writes. Server and Drive sync remain unverified. Requires one-time bukan paperpile login. Keeps duplicate skipping for Import; preserves existing PDFs; never edits synced files. BibTeX/RIS requires expectedCount; parsed-count mismatch aborts. Unknown outcome may have committed. Max 64 KiB, 100 references; small batches recommended.",
+            "annotations": { "readOnlyHint": false, "destructiveHint": true, "idempotentHint": false, "openWorldHint": true },
             "inputSchema": {
                 "type": "object", "additionalProperties": false, "required": ["format", "text"],
                 "properties": {
@@ -23,7 +23,8 @@ pub(super) fn tool_definitions() -> Vec<Value> {
                     "text": { "type": "string", "minLength": 1, "maxLength": 65536 },
                     "destination": { "type": "string", "enum": ["My Library"], "default": "My Library" },
                     "expectedCount": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Required for BibTeX/RIS: number of distinct requested references. For DOI/URL inputs, must match normalized unique input count if supplied." },
-                    "previewOnly": { "type": "boolean", "default": false, "description": "Parse and check live duplicates, then cancel without importing any references. Useful for checking the integration without library writes." }
+                    "previewOnly": { "type": "boolean", "default": false, "description": "Parse and check live duplicates, then cancel. Never imports, updates metadata or searches PDFs." },
+                    "postprocess": { "type": "boolean", "default": true, "description": "After verified presence, run Auto update and PDF search for the requested references. Set false for registration only. Requires Paperpile extension in the dedicated Chrome profile." }
                 }
             }
         }),

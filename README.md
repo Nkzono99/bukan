@@ -3,7 +3,7 @@
 Paperpileと連携する文献管理・研究解析のCLI／MCPツールです。CodexなどのMCPクライアントから調査を進め、根拠をたどれる研究ノートとwikiを育てます。
 
 - 所蔵文献の検索、PDF本文・ページ画像の取得
-- Paperpileへの文献登録、公開版・プレプリント候補の検索
+- Paperpileへの文献登録・書誌補完・PDF検索、公開版・プレプリント候補の検索
 - 全文読解ノート、主張と根拠、論文間の関係の保存
 - 研究wikiの改訂と、文献ごとのレビュー作業の管理
 
@@ -22,7 +22,7 @@ Paperpileと連携する文献管理・研究解析のCLI／MCPツールです�
 
 新しい会話で「Bukanの接続先を確認して、保存済み文献から調査を始めて」と依頼してください。PyPIには未公開です。Python未導入のWindowsでは、配布zip内の`bukan/install.cmd`も使えます。
 
-Paperpileへ文献を登録する場合は、Google Chromeを用意して初回に`python -m bukan paperpile login`を実行します。更新は、新しいwheelをpipで導入した後に`python -m bukan update`を実行します。
+Paperpileへ文献を登録する場合は、Google Chromeを用意して初回に`python -m bukan paperpile login`を実行します。書誌補完・PDF検索には専用ChromeにもPaperpile拡張機能を追加してください。更新は、新しいwheelをpipで導入した後に`python -m bukan update`を実行します。
 
 研究データはアプリ本体とは別に保存します。Windowsの新規環境では`%LOCALAPPDATA%/bukan/workspaces/default`を使い、既存の研究フォルダが設定済みなら引き継ぎます。Paperpile同期ファイルへの直接アクセスは読み取り専用です。
 

@@ -188,6 +188,18 @@ def test_missing_chrome_does_not_create_profile(tmp_path, monkeypatch):
     assert not profile.parent.exists()
 
 
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows MCP environment inheritance')
+def test_system_chrome_is_found_without_programfiles_environment(tmp_path, monkeypatch):
+    monkeypatch.delenv('PROGRAMFILES', raising=False)
+    monkeypatch.delenv('PROGRAMFILES(X86)', raising=False)
+    monkeypatch.delenv('LOCALAPPDATA', raising=False)
+    monkeypatch.setenv('SYSTEMDRIVE', str(tmp_path))
+    installed = tmp_path / 'Program Files/Google/Chrome/Application/chrome.exe'
+    installed.parent.mkdir(parents=True)
+    installed.write_bytes(b'fixture')
+    assert chrome_executable() == installed
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows path namespaces")
 @pytest.mark.parametrize(('source', 'expected'), [
     (r'\\?\C:\研究 O\profile', r'C:\研究 O\profile'),

@@ -2,7 +2,8 @@
 
 Only the native Bukan bridge supplies paths and validated import payloads. Login
 uses ordinary Chrome; automation subsequently reuses that dedicated profile.
-No private APIs, copied cookies, browser extensions or OS clipboard are needed.
+No private APIs, copied cookies or OS clipboard are used. Paperpile's extension
+is needed for its metadata/PDF features, but not for Paste registration.
 """
 from __future__ import annotations
 
@@ -41,9 +42,15 @@ def chrome_profile_path(profile: Path) -> str:
 def chrome_executable() -> Path | None:
     candidates = []
     if sys.platform == "win32":
+        # Some MCP clients inherit only a small environment whitelist, omitting
+        # ProgramFiles even though system-wide Chrome is installed there.
+        drive = os.environ.get("SYSTEMDRIVE", "C:")
+        defaults = {"PROGRAMFILES": f"{drive}/Program Files",
+                    "PROGRAMFILES(X86)": f"{drive}/Program Files (x86)"}
         for name in ("PROGRAMFILES", "PROGRAMFILES(X86)", "LOCALAPPDATA"):
-            if os.environ.get(name):
-                candidates.append(Path(os.environ[name]) / "Google/Chrome/Application/chrome.exe")
+            directory = os.environ.get(name) or defaults.get(name)
+            if directory:
+                candidates.append(Path(directory) / "Google/Chrome/Application/chrome.exe")
     elif sys.platform == "darwin":
         candidates.append(Path("/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"))
     else:
@@ -87,8 +94,9 @@ class PaperpileUI:
             state="visible", timeout=self.timeout_ms
         )
         skip = dialog.get_by_role("checkbox", name=re.compile(r"^Skip .*duplicates?", re.I))
-        if skip.count():
-            skip.check()
+        if skip.count() and not skip.is_checked():
+            # Paperpile's styled label intercepts pointer clicks on the input.
+            skip.press("Space")
         dialog.get_by_role("button", name="Select all", exact=True).click()
         content = dialog.inner_text()
         count = REFERENCE_COUNT.search(content)
@@ -112,6 +120,17 @@ class PaperpileUI:
     def cancel(self) -> None:
         self.page.get_by_role("dialog").get_by_role("button", name="Cancel", exact=True).click()
         self.page.get_by_role("dialog").wait_for(state="hidden")
+
+    def register_and_enrich(self, request: dict) -> dict:
+        result = self.import_references(request)
+        if request.get("previewOnly", False) or not request.get("postprocess", True):
+            result["postprocessing"] = {"status": "not_requested"}
+        elif result["status"] in ("present_in_browser", "already_present"):
+            from .paperpile_enrichment import PaperpileEnrichment
+            result["postprocessing"] = PaperpileEnrichment(self).run(request)
+        else:
+            result["postprocessing"] = {"status": "not_run", "detail": "Library presence was not verified."}
+        return result
 
     def import_references(self, request: dict) -> dict:
         """No retry after submission. A second *preview* verifies live presence."""
@@ -197,7 +216,7 @@ def operate(action: str, profile: Path, request: dict) -> dict:
                     chrome_profile_path(profile), executable_path=str(chrome), headless=True,
                     chromium_sandbox=True, timeout=20_000,
                     # Match ordinary Chrome's OS credential store used at login.
-                    ignore_default_args=["--password-store=basic", "--use-mock-keychain"],
+                    ignore_default_args=["--password-store=basic", "--use-mock-keychain", "--disable-extensions"],
                     viewport={"width": 1400, "height": 1000},
                 )
                 try:
@@ -209,7 +228,7 @@ def operate(action: str, profile: Path, request: dict) -> dict:
                         return {"status": "login_required", "detail": "Library not ready. Check network and sign in using: bukan paperpile login"}
                     if action in ("login", "status"):
                         return {"status": "ready", "detail": "The dedicated browser can access Paperpile My Library."}
-                    result = ui.import_references(request)
+                    result = ui.register_and_enrich(request)
                     result["destination"] = "My Library"
                     result["serverSyncVerified"] = False
                     result["pdfSyncVerified"] = False

@@ -61,5 +61,7 @@ deterministic checks; the agent host runs models and coordinates workers.
 For user-requested Paperpile registration, use `bukan-paperpile`. It requires
 installed Google Chrome and one-time `bukan paperpile login`; the user signs in
 in the dedicated window and closes it. `paperpile_browser_status` checks access.
+Install Paperpile's extension in that same window to enable the import tool's
+default Auto update and PDF search. See `bukan-paperpile` for partial outcomes.
 Login is optional for read-only PDF research and never reuses normal Chrome's
 profile. See `bukan paperpile --help` for the login/status commands.

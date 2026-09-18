@@ -32,6 +32,12 @@ pub struct RegisterImport {
     pub expected_count: Option<usize>,
     #[serde(default)]
     pub preview_only: bool,
+    #[serde(default = "default_postprocess")]
+    pub postprocess: bool,
+}
+
+fn default_postprocess() -> bool {
+    true
 }
 
 /// Resolve the expected count before any browser or network activity. Requiring
@@ -63,6 +69,7 @@ pub fn prepare_registration(input: RegisterImport) -> Result<Value, String> {
     }
     result["referenceCount"] = json!(expected);
     result["previewOnly"] = json!(input.preview_only);
+    result["postprocess"] = json!(input.postprocess);
     Ok(result)
 }
 
@@ -271,5 +278,22 @@ mod tests {
             json!({"format":"bibtex", "text":"@article{x}", "expectedCount":1})
         ))
         .is_ok());
+    }
+
+    #[test]
+    fn registration_defaults_to_followup_and_accepts_explicit_opt_out() {
+        for (extra, expected) in [(json!({}), true), (json!({"postprocess": false}), false)] {
+            let mut value = json!({"format": "identifiers", "text": "10.1234/a"});
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let result = prepare_registration(serde_json::from_value(value).unwrap()).unwrap();
+            assert_eq!(result["postprocess"], expected);
+        }
+        assert!(serde_json::from_value::<RegisterImport>(json!({
+            "format": "identifiers", "text": "10.1234/a", "postprocess": "true"
+        }))
+        .is_err());
     }
 }

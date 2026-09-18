@@ -11,7 +11,10 @@ user-selected references in My Library and verify presence through Paperpile's
 Paste UI. Install Google Chrome and run `python -m bukan paperpile login` once;
 sign in and close the dedicated window. Subsequent imports run within the MCP,
 without browser-control tools in the host. Login state stays in Bukan's user-data
-directory, separately from ordinary Chrome. Folder imports and PDF uploads are
+directory. Install Paperpile's extension in the dedicated Chrome to run the
+default Auto update and PDF search after import; inspect the separate
+`postprocessing` results. Use `postprocess: false` for registration only. Login
+state stays separate from ordinary Chrome. Folder imports and PDF uploads are
 not yet supported. See [registration](https://github.com/Nkzono99/bukan/blob/main/docs/paperpile-registration.md).
 Direct access to synced Paperpile files remains read-only.
 
