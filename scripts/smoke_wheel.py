@@ -57,7 +57,8 @@ def smoke(wheel: Path) -> None:
     # The child process alone sees the synthetic user profile. Never touch the
     # caller's actual default workspace, marketplace, or Python installation.
     with tempfile.TemporaryDirectory(prefix="bukan-pip-smoke-") as temporary:
-        root = Path(temporary)
+        # Match the installer's canonical paths even when TEMP uses an 8.3 alias.
+        root = Path(temporary).resolve()
         profile = root / "User 研究 O'Brien"
         profile.mkdir()
         environment = root / "venv"
@@ -118,6 +119,8 @@ def smoke(wheel: Path) -> None:
 
 
 if __name__ == "__main__":
+    # The fixture deliberately includes Japanese paths, including in CI logs.
+    sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("wheel", type=Path)
     args = parser.parse_args()
