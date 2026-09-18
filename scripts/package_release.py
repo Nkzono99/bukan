@@ -18,8 +18,9 @@ from install_local import digest, read_mcp_config, validate_destination
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALL_FILES = (
-    "install.cmd", "install.ps1", "install_windows.py", "windows-dependencies.json",
+    "install.cmd", "install.ps1", "windows-dependencies.json",
 )
+COMMON_INSTALL_FILES = ("install_local.py", "install_toolkit.py")
 
 
 def source_files(root: Path, suffix: str) -> list[Path]:
@@ -37,8 +38,8 @@ def source_files(root: Path, suffix: str) -> list[Path]:
     return result
 
 
-def package_release(binary: Path, target: str, output_dir: Path,
-                    version: str | None = None, *, root: Path = ROOT) -> tuple[Path, Path]:
+def bundle_inputs(binary: Path, target: str, version: str | None,
+                  root: Path) -> tuple[dict[str, Path], str, str]:
     # Fail before creating output when the release binary or any source is missing.
     binary = binary.expanduser().resolve(strict=True)
     if not binary.is_file():
@@ -67,10 +68,10 @@ def package_release(binary: Path, target: str, output_dir: Path,
         ".codex-plugin/plugin.json": plugin_root / ".codex-plugin/plugin.json",
         ".mcp.json": plugin_root / ".mcp.json",
         "README.md": plugin_root / "README.md",
-        "install_local.py": root / "scripts/install_local.py",
         "research-engine/pyproject.toml": engine / "pyproject.toml",
         "research-engine/uv.lock": engine / "uv.lock",
     }
+    inputs.update({name: root / "scripts" / name for name in COMMON_INSTALL_FILES})
     if executable == "bukan.exe":
         inputs.update({name: root / "scripts" / name for name in WINDOWS_INSTALL_FILES})
     for folder, suffix, prefix in ((engine / "src", ".py", "research-engine/src"),
@@ -91,26 +92,52 @@ def package_release(binary: Path, target: str, output_dir: Path,
         if not source.is_file() or source.resolve() != source.absolute():
             raise ValueError(f"Missing or linked package input: {source}")
     read_mcp_config(inputs[".mcp.json"])
-    output_dir = validate_destination(output_dir)
-    for source_root in (engine, plugin_root, review):
-        if output_dir.is_relative_to(source_root):
+    return inputs, current_version, executable
+
+
+def output_destination(path: Path, root: Path) -> Path:
+    destination = validate_destination(path)
+    for source in ("research-engine", "plugins/bukan", "templates/workspace/.agents/skills/bukan-paper-review"):
+        if destination.is_relative_to((root / source).resolve()):
             raise ValueError("The output directory must be outside package sources.")
-    release_name = f"bukan-{current_version}-{target}"
-    release_dir = output_dir / release_name
-    bundle = release_dir / "bukan"
-    archive = output_dir / f"{release_name}.zip"
-    if os.path.lexists(release_dir) or os.path.lexists(archive):
-        raise FileExistsError(f"Release output already exists: {release_name}")
+    return destination
+
+
+def write_bundle(bundle: Path, inputs: dict[str, Path], target: str, version: str, executable: str) -> Path:
     bundle.mkdir(parents=True)
     for relative, source in sorted(inputs.items()):
         destination = bundle / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
     (bundle / f"bin/{executable}").chmod(0o755)
-    metadata = {"formatVersion": 1, "version": current_version, "target": target,
+    metadata = {"formatVersion": 1, "version": version, "target": target,
                 "binary": f"bin/{executable}",
                 "files": {relative: digest(bundle / relative) for relative in sorted(inputs)}}
     (bundle / "bundle.json").write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
+    return bundle
+
+
+def create_bundle(binary: Path, target: str, bundle: Path,
+                  version: str | None = None, *, root: Path = ROOT) -> Path:
+    """Create the verified payload shared by release archives and Python wheels."""
+    inputs, current_version, executable = bundle_inputs(binary, target, version, root)
+    if os.path.lexists(bundle):
+        raise FileExistsError(f"Bundle output already exists: {bundle}")
+    bundle = output_destination(bundle, root)
+    return write_bundle(bundle, inputs, target, current_version, executable)
+
+
+def package_release(binary: Path, target: str, output_dir: Path,
+                    version: str | None = None, *, root: Path = ROOT) -> tuple[Path, Path]:
+    inputs, current_version, executable = bundle_inputs(binary, target, version, root)
+    output_dir = output_destination(output_dir, root)
+    release_name = f"bukan-{current_version}-{target}"
+    release_dir = output_dir / release_name
+    bundle = release_dir / "bukan"
+    archive = output_dir / f"{release_name}.zip"
+    if os.path.lexists(release_dir) or os.path.lexists(archive):
+        raise FileExistsError(f"Release output already exists: {release_name}")
+    write_bundle(bundle, inputs, target, current_version, executable)
     with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED) as output:
         for source in sorted(bundle.rglob("*")):
             if source.is_file():

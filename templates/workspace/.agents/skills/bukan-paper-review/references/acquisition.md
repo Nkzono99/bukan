@@ -4,6 +4,35 @@ Use to find the exact full text of a needed paper or maintain useful references
 that remain unavailable. Acquisition, reading and import/purchase decisions are
 separate. A PDF link is not a retrieved PDF and a downloaded PDF is not a review.
 
+## Prepare public links, including for locally owned papers
+
+For bibliography tables or public literature maps, search public copies even when
+Paperpile already holds the PDF. Use the research MCP's `search_public_access`
+to reuse saved work, then `find_public_versions(papers)` with Bukan paper IDs,
+DOIs, or title/authors/year. Its Crossref/OpenAlex results are candidates, not
+confirmed bibliographic matches or newly tested access routes. A title search
+keeps possible matches provisional. Provider errors and empty searches remain
+explicit; neither establishes that no public copy exists.
+
+Use `check_public_urls` for selected links and attach each check to the candidate
+with that exact URL. HTTP 200 may be a landing/login page. A PDF signature is only
+a sample, not a complete download or an identity check. Keep metadata-reported
+free-to-read, reported/verified licenses, and observed access failures separate.
+Do not infer paywall/non-OA from 403, 429, timeouts or broken links.
+
+Save with `save_public_access(report, expected_revision)`. Use 0 for a new ID;
+for a repeat search, retrieve the current report and merge useful earlier
+candidates, checks and human corrections before saving its next revision.
+External searches/plugins can add the same `PublicCandidate` objects with their
+provider, source URL and discovery date. Unverified versions and licenses are
+valid partial results. `get_public_access` and `search_public_access` return JSON
+and Markdown suitable for an external map; earlier report revisions remain
+available. No full-paper review is required to use these metadata tools.
+
+The access reports live in an optional table in the research DB and are included
+in its JSON export. They do not mark a paper acquired/read, create scientific
+Evidence, or replace the purchase/acquisition backlog described below.
+
 ## Resolve full text in order
 
 1. Search mounted Google Drive/Paperpile through Bukan's read-only library index.

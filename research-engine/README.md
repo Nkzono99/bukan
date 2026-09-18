@@ -6,9 +6,9 @@ Rust内部型に依存しないPythonパッケージで、CLI、stdio MCP、汎�
 
 ## 起動
 
-Windowsで通常利用する場合は、配布物の`install.cmd`、Codexへのプラグインインストールの2操作で準備します。インストーラーが`bukan setup`を実行するため、Python・uvの事前導入や研究フォルダの手動作成は不要です。新規の研究は`%LOCALAPPDATA%/bukan/workspaces/default`、実行環境は`%LOCALAPPDATA%/bukan/research-runtime`に置きます。既存の研究フォルダが設定済みならその場所を保ちます。[利用ガイド](../docs/usage.md)を参照してください。
+通常利用ではPython 3.11以上の64-bit環境にBukanの配布wheelを`pip install`し、`python -m bukan install`で初期化してから、CodexへBukanプラグインをインストールします。PyPIには未公開のため、wheelのパスを指定します。Windowsでは依存ツールも準備し、新規の研究は`%LOCALAPPDATA%/bukan/workspaces/default`、実行環境は`%LOCALAPPDATA%/bukan/research-runtime`に置きます。既存の研究フォルダが設定済みならその場所を保ちます。LinuxではPopplerを先に用意します。Python未導入のWindowsでは配布zipの`install.cmd`も使えます。[利用ガイド](../docs/usage.md)を参照してください。
 
-CLIからは`bukan research [workspace] -- <engine args>`または`bukan research-mcp [workspace]`を使います。`bukan paths --json`で保存場所を確認できます。Linuxの手動導入でも、引数なしの`bukan setup`で未設定時の管理ワークスペースを作れます。
+CLIからは`bukan research [workspace] -- <engine args>`または`bukan research-mcp [workspace]`を使います。`python -m bukan`からも同じコマンドを呼べます。`bukan paths --json`で保存場所を確認できます。引数なしの`bukan setup`は、WindowsとLinuxで未設定時の管理ワークスペースを作れます。
 
 研究エンジンを単体で開発する場合はPython 3.11以上とuvを使います。以下はリポジトリのルートから実行する例です。
 ストアは所有ホストのローカルディスク上に置きます。
@@ -135,6 +135,15 @@ uv run --project research-engine bukan-research --store C:/Research/topic/data/r
 | `get_paper_note` | 現在または指定改訂のMarkdownノートと、ページごとの読解状況を取得する |
 | `export_paper_note` | DBの隣の`paper-notes/`へ改訂ごとのMarkdownと画像のコピーを出力する。既存ファイルの編集は上書きしない |
 | `plan_paper_reviews` | 読了済みの同じPDF版を再利用し、残る文献の担当・進捗を保存する。サブエージェントの起動はクライアントが行う |
+| `find_public_versions` | 文献ID・DOI・書誌から公開版候補を一括検索。ローカルPDFの所蔵とは独立 |
+| `check_public_urls` | URLの応答・転送先・確認日時を記録。無料の全文やライセンスの確認とは区別 |
+| `save_public_access` | 外部検索由来の候補も、現改訂を指定して履歴付き保存 |
+| `get_public_access`, `search_public_access` | 保存した公開版候補を、過去の改訂も含めJSON・Markdownで取得 |
+
+公開先の調査は全文読解を前提にしません。[公開版リンクの利用手順](../docs/public-access.md)を参照してください。
+結果は研究DB内の追加テーブル`public_access_reports`へ保存し、既存の形式2の科学的レコードとは分けます。
+従来のレコード形式は変えず、既存クライアントも引き続き読み書きできます。通常のJSON `export`は、保存済みなら
+`public_access`キーにこの調査履歴も含めます。形式1のDBへの書き込みには、従来どおり明示的な移行が必要です。
 
 新規登録は`expected_revision: 0`、更新は取得した現改訂を指定します。同じ内容の再登録では改訂を増やしません。
 古い改訂からの更新は競合として拒否します。これは手修正を含む同時更新の保護であり、利用者認証の仕組みではありません。

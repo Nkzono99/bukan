@@ -1,4 +1,4 @@
-"""Windows onboarding boundaries; all installs and profiles are disposable fixtures."""
+"""Toolkit onboarding boundaries; all installs and profiles are disposable fixtures."""
 
 import io
 import json
@@ -11,14 +11,14 @@ import unittest
 from unittest.mock import patch
 import zipfile
 
-import install_windows as installer
+import install_toolkit as installer
 from install_local import digest, verify_bundle
 
 
 SCRIPTS = Path(__file__).resolve().parent
 
 
-class WindowsInstallerTests(unittest.TestCase):
+class ToolkitInstallerTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "nt", "Win32 canonical prefix")
     def test_rust_canonical_path_uses_same_profile_root(self):
         canonical = Path("\\\\?\\" + str(self.data))
@@ -44,7 +44,7 @@ class WindowsInstallerTests(unittest.TestCase):
             "research-engine/src/bukan_research/cli.py": "def main(): pass\n",
             "skills/bukan-paper-review/SKILL.md": "# Paper review\n",
             "skills/bukan-setup/SKILL.md": "# Setup\n",
-            "install_windows.py": "# Never executed by a rejection test.\n",
+            "install_toolkit.py": "# Never executed by a rejection test.\n",
             "install_local.py": "# Never executed by a rejection test.\n",
             "windows-dependencies.json": "{}",
         }
@@ -97,6 +97,12 @@ class WindowsInstallerTests(unittest.TestCase):
     def snapshot(self, root):
         return {path.relative_to(root).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
                 for path in root.rglob("*") if path.is_file()}
+
+    def storage_paths(self, selected=None):
+        return {"dataDir": str(self.data), "configDir": str(self.profile / "config"),
+                "cacheDir": str(self.profile / "cache"),
+                "managedWorkspace": str(self.data / "workspaces/default"),
+                "selectedWorkspace": str(selected) if selected else None}
 
     def test_corrupt_bundle_does_not_create_installation(self):
         (self.bundle / "bin/bukan.exe").write_bytes(b"modified after packaging")
@@ -252,9 +258,11 @@ class WindowsInstallerTests(unittest.TestCase):
 
     def test_invalid_marketplace_stops_install_before_dependency_changes(self):
         path = self.write(self.profile / ".agents/plugins/marketplace.json", "invalid existing configuration")
-        paths = {"dataDir": str(self.data)}
+        paths = self.storage_paths()
         with patch.object(installer.subprocess, "check_output", return_value=json.dumps(paths)), \
                 patch.object(installer, "ensure_dependency") as dependency, \
+                patch.object(installer.sys, "platform", "win32"), \
+                patch.object(installer.platform, "machine", return_value="AMD64"), \
                 patch.object(installer.subprocess, "run") as setup:
             with self.assertRaises(ValueError):
                 installer.install(self.bundle, profile=self.profile)
@@ -286,7 +294,7 @@ class WindowsInstallerTests(unittest.TestCase):
         existing_workspace = self.profile / "existing-research"
         self.write(existing_workspace / "research.sqlite3", "existing research bytes")
         research_before = self.snapshot(existing_workspace)
-        paths = {"dataDir": str(self.data), "managedWorkspace": str(self.data / "workspaces/default"), "selectedWorkspace": str(existing_workspace)}
+        paths = self.storage_paths(existing_workspace)
         overrides = {"BUKAN_DATA_DIR": str(self.data), "BUKAN_CONFIG_DIR": str(self.profile / "config"),
                      "BUKAN_CACHE_DIR": str(self.profile / "cache"), "BUKAN_WORKSPACE": str(existing_workspace)}
 
@@ -296,6 +304,8 @@ class WindowsInstallerTests(unittest.TestCase):
             shutil.copyfile(poppler_archive, destination)
 
         with patch.dict(os.environ, dict(overrides, UNRELATED_SECRET="must not be captured"), clear=True), \
+                patch.object(installer.sys, "platform", "win32"), \
+                patch.object(installer.platform, "machine", return_value="AMD64"), \
                 patch.object(installer.subprocess, "check_output", return_value=json.dumps(paths)) as command, \
                 patch.object(installer.subprocess, "run") as setup, \
                 patch.object(installer, "download", side_effect=copy_download), \
@@ -313,6 +323,130 @@ class WindowsInstallerTests(unittest.TestCase):
         self.assertTrue((self.dependencies / pointer["popplerBin"] / "pdftotext.exe").is_file())
         self.assertEqual(self.snapshot(existing_workspace), research_before)
         self.assertFalse((self.data / "workspaces/default").exists())
+
+    def make_linux_bundle(self):
+        self.files["bin/bukan"] = self.files.pop("bin/bukan.exe")
+        (self.bundle / "bin/bukan.exe").rename(self.bundle / "bin/bukan")
+        metadata = self.refresh_manifest()
+        metadata.update(target="x86_64-unknown-linux-gnu", binary="bin/bukan")
+        self.write(self.bundle / "bundle.json", json.dumps(metadata))
+
+    def test_incompatible_platform_fails_before_running_binary_or_writing(self):
+        before = self.snapshot(self.root)
+        with patch.object(installer.sys, "platform", "darwin"), \
+                patch.object(installer.subprocess, "check_output") as command, \
+                patch.object(installer.subprocess, "run") as setup:
+            with self.assertRaisesRegex(ValueError, "requires win32 x86_64"):
+                installer.install(self.bundle, profile=self.profile)
+        command.assert_not_called()
+        setup.assert_not_called()
+        self.assertEqual(self.snapshot(self.root), before)
+
+    def test_linux_missing_prerequisites_fail_before_running_binary_or_writing(self):
+        self.make_linux_bundle()
+        before = self.snapshot(self.root)
+        for missing, diagnostic in (("pdftoppm", "poppler-utils"), ("uv", "python -m bukan install")):
+            with self.subTest(missing=missing), \
+                    patch.object(installer.sys, "platform", "linux"), \
+                    patch.object(installer.platform, "machine", return_value="x86_64"), \
+                    patch.object(installer.shutil, "which", side_effect=lambda tool: None if tool == missing else f"/usr/bin/{tool}"), \
+                    patch.object(installer.subprocess, "check_output") as command, \
+                    patch.object(installer.subprocess, "run") as setup:
+                with self.assertRaisesRegex(ValueError, diagnostic):
+                    installer.install(self.bundle, profile=self.profile)
+                command.assert_not_called()
+                setup.assert_not_called()
+                self.assertEqual(self.snapshot(self.root), before)
+
+    def test_linux_install_uses_system_poppler_and_preserves_research(self):
+        self.make_linux_bundle()
+        self.data = self.profile / ".local/share/bukan"
+        existing_workspace = self.profile / "existing-research"
+        self.write(existing_workspace / "research.sqlite3", "existing research bytes")
+        research_before = self.snapshot(existing_workspace)
+        paths = self.storage_paths(existing_workspace)
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(installer.sys, "platform", "linux"), \
+                patch.object(installer.platform, "machine", return_value="x86_64"), \
+                patch.object(installer.shutil, "which", side_effect=lambda tool: f"/usr/bin/{tool}"), \
+                patch.object(installer.subprocess, "check_output", return_value=json.dumps(paths)) as command, \
+                patch.object(installer.subprocess, "run") as setup, \
+                patch.object(installer, "ensure_dependency") as dependency, \
+                patch("sys.stdout", new_callable=io.StringIO) as output:
+            executable = installer.install(self.bundle, profile=self.profile)
+        self.assertEqual(executable.name, "bukan")
+        command.assert_called_once_with([str(self.bundle / "bin/bukan"), "paths", "--json"], encoding="utf-8")
+        setup.assert_called_once_with([str(executable), "setup"], check=True)
+        dependency.assert_not_called()
+        self.assertFalse((self.data / "dependencies").exists())
+        self.assertIn(str(existing_workspace), output.getvalue())
+        self.assertEqual(self.snapshot(existing_workspace), research_before)
+        _, _, mcp = verify_bundle(executable.parent.parent)
+        self.assertTrue(all(server["command"] == str(executable) for server in mcp["mcpServers"].values()))
+        marketplace = installer.read_json(self.profile / ".agents/plugins/marketplace.json")
+        self.assertTrue(marketplace["plugins"][0]["source"]["path"].startswith("./.local/share/bukan/installations/"))
+
+    def test_updated_bundle_switches_marketplace_and_preserves_previous_install_and_research(self):
+        self.make_linux_bundle()
+        self.data = self.profile / ".local/share/bukan"
+        existing_workspace = self.profile / "existing-research"
+        self.write(existing_workspace / "research.sqlite3", "existing research bytes")
+        research_before = self.snapshot(existing_workspace)
+        paths = self.storage_paths(existing_workspace)
+        with patch.dict(os.environ, {}, clear=True), \
+                patch.object(installer.sys, "platform", "linux"), \
+                patch.object(installer.platform, "machine", return_value="x86_64"), \
+                patch.object(installer.shutil, "which", side_effect=lambda tool: f"/usr/bin/{tool}"), \
+                patch.object(installer.subprocess, "check_output", return_value=json.dumps(paths)), \
+                patch.object(installer.subprocess, "run"), \
+                patch("sys.stdout", new_callable=io.StringIO):
+            first = installer.install(self.bundle, profile=self.profile)
+            first_before = self.snapshot(first.parent.parent)
+            manifest = self.bundle / ".codex-plugin/plugin.json"
+            self.write(manifest, json.dumps({"name": "bukan", "version": "0.2.3"}))
+            metadata = installer.read_json(self.bundle / "bundle.json")
+            metadata["version"] = "0.2.3"
+            metadata["files"][".codex-plugin/plugin.json"] = digest(manifest)
+            self.write(self.bundle / "bundle.json", json.dumps(metadata))
+            second = installer.install(self.bundle, profile=self.profile)
+            marketplace_path = self.profile / ".agents/plugins/marketplace.json"
+            marketplace = installer.read_json(marketplace_path)
+            self.assertEqual(marketplace["plugins"][0]["source"]["path"],
+                             "./" + second.parent.parent.relative_to(self.profile).as_posix())
+            marketplace_before = self.snapshot(marketplace_path.parent)
+            self.assertEqual(installer.install(self.bundle, profile=self.profile), second)
+        self.assertNotEqual(first, second)
+        self.assertEqual(self.snapshot(first.parent.parent), first_before)
+        self.assertEqual(self.snapshot(existing_workspace), research_before)
+        self.assertEqual(self.snapshot(marketplace_path.parent), marketplace_before)
+        self.assertEqual(len(list(marketplace_path.parent.glob("marketplace.json.bukan-backup-*"))), 1)
+
+    def test_linux_xdg_storage_roots_are_persisted_for_hosts_without_xdg_environment(self):
+        self.make_linux_bundle()
+        xdg = {"XDG_DATA_HOME": str(self.profile / "custom-data"),
+               "XDG_CONFIG_HOME": str(self.profile / "custom-config"),
+               "XDG_CACHE_HOME": str(self.profile / "custom-cache")}
+        self.data = Path(xdg["XDG_DATA_HOME"]) / "bukan"
+        paths = self.storage_paths(self.profile / "saved-workspace")
+        paths.update(configDir=str(Path(xdg["XDG_CONFIG_HOME"]) / "bukan"),
+                     cacheDir=str(Path(xdg["XDG_CACHE_HOME"]) / "bukan"))
+        with patch.dict(os.environ, xdg, clear=True), \
+                patch.object(installer.sys, "platform", "linux"), \
+                patch.object(installer.platform, "machine", return_value="x86_64"), \
+                patch.object(installer.shutil, "which", side_effect=lambda tool: f"/usr/bin/{tool}"), \
+                patch.object(installer.subprocess, "check_output", return_value=json.dumps(paths)), \
+                patch.object(installer.subprocess, "run"), \
+                patch("sys.stdout", new_callable=io.StringIO):
+            executable = installer.install(self.bundle, profile=self.profile)
+        expected = {"BUKAN_DATA_DIR": paths["dataDir"], "BUKAN_CONFIG_DIR": paths["configDir"],
+                    "BUKAN_CACHE_DIR": paths["cacheDir"]}
+        with patch.dict(os.environ, {}, clear=True):
+            _, _, mcp = verify_bundle(executable.parent.parent)
+            for server in mcp["mcpServers"].values():
+                self.assertEqual(server["env"], expected)
+                self.assertNotIn("BUKAN_WORKSPACE", server["env"])
+            receipt = installer.read_json(executable.parent.parent / "installation.json")
+            self.assertEqual(receipt["overrides"], expected)
 
     @unittest.skipUnless(os.name == "nt" and shutil.which("powershell.exe"), "Windows PowerShell bootstrap")
     def test_powershell_rejects_corrupt_and_traversal_bundles_before_execution(self):

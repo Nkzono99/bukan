@@ -21,6 +21,13 @@ These are persistent research data. `bukan paths --json` reports the data,
 configuration, cache, and workspace locations. An absolute `BUKAN_DATA_DIR`
 overrides the managed data root without moving existing research.
 
+The pip distribution also exposes these commands through `python -m bukan`.
+After installing the OS-specific wheel, `python -m bukan install` prepares the
+toolkit, runtime, and personal plugin registration; pip installation alone does
+not initialize user data. `python -m bukan update` applies an already upgraded
+pip package while preserving the selected workspace. These installation commands
+belong to the Python launcher, not the native executable or research MCP.
+
 Workspace selection is explicit path, then `BUKAN_WORKSPACE`, then Bukan's saved
 default; the current directory is not a fallback. Invalid configured paths must
 be resolved, not replaced with a new empty store. Use
@@ -54,14 +61,25 @@ IDs for current research. List saving writes only the research workspace, never
 Paperpile. `clear_paper_list` clears the saved current list.
 
 PDF tools use Bukan's installed Poppler or a manually prepared Poppler on PATH.
-The Windows `install.cmd` prepares private dependencies; manual installations
-must provide them. PDF access can trigger Drive hydration but does not modify
+On Windows, `python -m bukan install` or the optional `install.cmd` prepares
+private dependencies. Linux installations require distribution Poppler on PATH.
+PDF access can trigger Drive hydration but does not modify
 originals. Page batches are 1–10 pages and page images have a maximum dimension of
 2,000 pixels. Failed extraction or a changed hash must stay visible; retrieval
 does not assess reading completion. An external PDF can be captured as a research
 Source with its verified identity/version without a library write.
 
 ## Research records and revisions
+
+Public-copy metadata uses five dedicated research tools: `find_public_versions`
+(1–20 paper IDs/DOIs/bibliographic queries), `check_public_urls` (1–20 URLs),
+`save_public_access` (whole report plus expected revision), `get_public_access`
+(current or historical report), and `search_public_access` (query/pagination).
+Retrieval returns JSON plus Markdown. These tools do not require PDF reading;
+see [acquisition](acquisition.md) for public-link preparation versus acquisition.
+Use `save_public_access`, not `put_records`, for this format. CLI clients can send
+JSON to `bukan research <workspace> -- public-access` with operation
+`find`, `check`, `save`, `get`, or `search` and the corresponding tool arguments.
 
 `search_records(query, kind, limit, offset)` searches current records by literal
 substring, including `kind="paper_note"`; paginate as needed. It is not semantic

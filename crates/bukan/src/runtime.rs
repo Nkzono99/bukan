@@ -209,6 +209,11 @@ pub fn run(workspace: &Path, args: &[String]) -> Result<ExitStatus, String> {
     runtime.require_ready()?;
     hidden_command(&runtime.python())
         .args(runtime.arguments(&store, args))
+        .env(
+            "BUKAN_EXECUTABLE",
+            std::env::current_exe().map_err(|error| error.to_string())?,
+        )
+        .env("BUKAN_WORKSPACE", workspace)
         .current_dir(workspace)
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())

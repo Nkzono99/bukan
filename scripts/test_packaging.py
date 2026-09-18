@@ -10,7 +10,7 @@ import unittest
 import zipfile
 
 from install_local import digest, install_bundle
-from package_release import ROOT, WINDOWS_INSTALL_FILES, package_release
+from package_release import COMMON_INSTALL_FILES, ROOT, WINDOWS_INSTALL_FILES, create_bundle, package_release
 
 
 class PackagingTests(unittest.TestCase):
@@ -27,8 +27,7 @@ class PackagingTests(unittest.TestCase):
         self.write("research-engine/pyproject.toml", '[project]\nname = "bukan-research"\n')
         self.write("research-engine/uv.lock", "version = 1\n")
         self.write("research-engine/src/bukan_research/cli.py", "def main(): pass\n")
-        self.write("scripts/install_local.py", (ROOT / "scripts/install_local.py").read_text(encoding="utf-8"))
-        for name in WINDOWS_INSTALL_FILES:
+        for name in COMMON_INSTALL_FILES + WINDOWS_INSTALL_FILES:
             self.write(f"scripts/{name}", (ROOT / "scripts" / name).read_text(encoding="utf-8"))
         self.binary = self.write("target/release/bukan.exe", "placeholder executable\n")
 
@@ -51,7 +50,7 @@ class PackagingTests(unittest.TestCase):
         self.write("Paperpile/paper.pdf", "private source")
         bundle, archive = self.package()
         metadata = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
-        for name in WINDOWS_INSTALL_FILES:
+        for name in COMMON_INSTALL_FILES + WINDOWS_INSTALL_FILES:
             self.assertEqual((bundle / name).read_bytes(), (self.root / "scripts" / name).read_bytes())
             self.assertEqual(metadata["files"][name], digest(bundle / name))
         source = self.root / "templates/workspace/.agents/skills/bukan-paper-review"
@@ -68,6 +67,24 @@ class PackagingTests(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             self.package(binary=self.root / "missing.exe")
         self.assertFalse(self.output.exists())
+
+    def test_standalone_payload_matches_zip_bundle(self):
+        bundle, _ = self.package()
+        payload = create_bundle(self.binary, "x86_64-pc-windows-msvc", self.output / "wheel-payload",
+                                self.version, root=self.root)
+        originals = {path.relative_to(bundle): path.read_bytes() for path in bundle.rglob("*") if path.is_file()}
+        self.assertEqual({path.relative_to(payload): path.read_bytes() for path in payload.rglob("*") if path.is_file()}, originals)
+        with self.assertRaises(FileExistsError):
+            create_bundle(self.binary, "x86_64-pc-windows-msvc", payload, root=self.root)
+
+    def test_linux_musl_bundle_uses_shared_installer(self):
+        binary = self.write("target/release/bukan", "placeholder static executable")
+        payload = create_bundle(binary, "x86_64-unknown-linux-musl", self.output / "wheel-payload", root=self.root)
+        metadata = json.loads((payload / "bundle.json").read_text(encoding="utf-8"))
+        self.assertEqual(metadata["target"], "x86_64-unknown-linux-musl")
+        self.assertEqual(metadata["binary"], "bin/bukan")
+        self.assertTrue((payload / "install_toolkit.py").is_file())
+        self.assertFalse((payload / "install.ps1").exists())
 
     def test_missing_windows_installer_does_not_create_output(self):
         (self.root / "scripts/install.ps1").unlink()
@@ -133,6 +150,9 @@ class PackagingTests(unittest.TestCase):
         binary = self.write("target/release/bukan", "placeholder unix executable")
         bundle, archive = self.package(binary=binary, target="x86_64-unknown-linux-gnu")
         metadata = json.loads((bundle / "bundle.json").read_text(encoding="utf-8"))
+        for name in COMMON_INSTALL_FILES:
+            self.assertEqual((bundle / name).read_bytes(), (self.root / "scripts" / name).read_bytes())
+            self.assertEqual(metadata["files"][name], digest(bundle / name))
         for name in WINDOWS_INSTALL_FILES:
             self.assertFalse((bundle / name).exists())
             self.assertNotIn(name, metadata["files"])

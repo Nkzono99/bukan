@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Finish Windows setup using the Python obtained by install.ps1."""
+"""Install the Bukan toolkit and register its plugin on Windows or Linux."""
 from __future__ import annotations
 
 import argparse
@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
 import shutil
 import subprocess
@@ -146,17 +147,37 @@ def register_marketplace(path: Path, marketplace: dict) -> None:
     write_json(path, marketplace)
 
 
-def windows_bundle(bundle: Path) -> dict:
+SUPPORTED_BUNDLES = {
+    "x86_64-pc-windows-msvc": ("win32", "bin/bukan.exe"),
+    "x86_64-unknown-linux-gnu": ("linux", "bin/bukan"),
+    "x86_64-unknown-linux-musl": ("linux", "bin/bukan"),
+}
+
+
+def toolkit_bundle(bundle: Path) -> dict:
     metadata, _, _ = verify_bundle(bundle)
-    if (metadata.get("target") != "x86_64-pc-windows-msvc"
-            or metadata.get("binary") != "bin/bukan.exe"
+    target = SUPPORTED_BUNDLES.get(metadata.get("target"))
+    if (target is None or metadata.get("binary") != target[1]
             or not re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", metadata.get("version", ""))):
-        raise ValueError("Use the Bukan Windows x64 release bundle.")
+        raise ValueError("Use a supported Bukan Windows x64 or Linux x86_64 release bundle.")
     return metadata
 
 
+def check_prerequisites(metadata: dict) -> None:
+    expected_platform, _ = SUPPORTED_BUNDLES[metadata["target"]]
+    if sys.platform != expected_platform or platform.machine().lower() not in ("amd64", "x86_64"):
+        raise ValueError(f"This bundle requires {expected_platform} x86_64; install the bundle for your platform.")
+    if sys.platform == "linux":
+        missing = [tool for tool in ("pdfinfo", "pdftotext", "pdftoppm") if shutil.which(tool) is None]
+        if missing:
+            raise ValueError("Linux requires Poppler before installation (missing: " + ", ".join(missing)
+                             + "). Install your distribution's poppler-utils package, then rerun the installer.")
+        if shutil.which("uv") is None:
+            raise ValueError("uv is required to prepare the research runtime. Use python -m bukan install after installing the Bukan wheel, or install uv first.")
+
+
 def install_toolkit(bundle: Path, data: Path, overrides: dict[str, str]) -> Path:
-    metadata = windows_bundle(bundle)
+    metadata = toolkit_bundle(bundle)
     fingerprint = hashlib.sha256((digest(bundle / "bundle.json") + json.dumps(overrides, sort_keys=True)).encode()).hexdigest()[:16]
     destination = ordinary_destination(data / "installations" / f"{metadata['version']}-{fingerprint}" / "bukan")
     if destination.exists():
@@ -191,26 +212,35 @@ def install_toolkit(bundle: Path, data: Path, overrides: dict[str, str]) -> Path
 
 def install(bundle: Path, uv_archive: Path | None = None, *, profile: Path | None = None) -> Path:
     bundle = bundle.resolve()
-    metadata = windows_bundle(bundle)
+    metadata = toolkit_bundle(bundle)
+    check_prerequisites(metadata)
+    if uv_archive is not None and sys.platform != "win32":
+        raise ValueError("--uv-archive is only supported by the Windows bootstrap.")
     binary = bundle / metadata["binary"]
     paths = json.loads(subprocess.check_output([str(binary), "paths", "--json"], encoding="utf-8"))
     data = ordinary_destination(Path(paths["dataDir"]))
     profile = (profile or Path.home()).resolve()
     if not data.is_relative_to(profile):
-        raise ValueError("The Windows plugin installer requires BUKAN_DATA_DIR inside your user profile. Use manual CLI installation for an external data root.")
-    overrides = {name: os.environ[name] for name in
-                 ("BUKAN_DATA_DIR", "BUKAN_CONFIG_DIR", "BUKAN_CACHE_DIR", "BUKAN_WORKSPACE") if name in os.environ}
+        raise ValueError("The plugin installer requires BUKAN_DATA_DIR inside your user profile. Use manual CLI installation for an external data root.")
+    # The agent host may not inherit this shell's XDG/AppData environment.
+    # Keep the resolved storage roots, while letting saved workspace selection
+    # remain changeable unless the installer explicitly used BUKAN_WORKSPACE.
+    overrides = {name: str(ordinary_destination(Path(paths[field]))) for name, field in (
+        ("BUKAN_DATA_DIR", "dataDir"), ("BUKAN_CONFIG_DIR", "configDir"), ("BUKAN_CACHE_DIR", "cacheDir"))}
+    if "BUKAN_WORKSPACE" in os.environ:
+        overrides["BUKAN_WORKSPACE"] = os.environ["BUKAN_WORKSPACE"]
     # Validate marketplace before downloading or changing the active runtime.
     marketplace_entry(profile, data / "installations")
-    assets = read_json(bundle / "windows-dependencies.json")
-    dependencies = ordinary_destination(data / "dependencies")
-    uv = ensure_dependency(dependencies, "uv", assets["uv"], uv_archive)
-    poppler = ensure_dependency(dependencies, "poppler", assets["poppler"])
-    write_json(dependencies / "current.json", {"version": 1,
-               "uv": (uv / "uv.exe").relative_to(dependencies).as_posix(),
-               "popplerBin": (poppler / assets["poppler"]["bin"]).relative_to(dependencies).as_posix()})
+    if sys.platform == "win32":
+        assets = read_json(bundle / "windows-dependencies.json")
+        dependencies = ordinary_destination(data / "dependencies")
+        uv = ensure_dependency(dependencies, "uv", assets["uv"], uv_archive)
+        poppler = ensure_dependency(dependencies, "poppler", assets["poppler"])
+        write_json(dependencies / "current.json", {"version": 1,
+                   "uv": (uv / "uv.exe").relative_to(dependencies).as_posix(),
+                   "popplerBin": (poppler / assets["poppler"]["bin"]).relative_to(dependencies).as_posix()})
     destination = install_toolkit(bundle, data, overrides)
-    executable = destination / "bin/bukan.exe"
+    executable = destination / metadata["binary"]
     subprocess.run([str(executable), "setup"], check=True)
     path, marketplace = marketplace_entry(profile, destination)
     register_marketplace(path, marketplace)
@@ -228,8 +258,6 @@ def main() -> None:
     parser.add_argument("--uv-archive", type=Path)
     args = parser.parse_args()
     try:
-        if sys.platform != "win32":
-            raise ValueError("Use install_local.py on Linux.")
         install(args.bundle, args.uv_archive)
     except (OSError, ValueError, KeyError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Installation failed: {error}\n")

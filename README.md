@@ -4,23 +4,29 @@ Bukanは、Paperpileの文献を読み取り専用で検索・読解し、研究
 
 利用手順は[CLI・MCPで研究を進める](docs/usage.md)、保存形式は[ワークスペース仕様](docs/workspace.md)を参照してください。既存の研究フォルダ、DB、ノート、wikiをそのまま使います。
 
-## Windowsでは2回の導入操作で始める
+## pipでツールを入れ、Codexへプラグインを追加する
 
-Codexと、Google Driveから見えるPaperpile同期フォルダを用意したら、Windows用の配布zipを展開します。
+Python 3.11以上の64-bit環境、Codex、Google Driveから見えるPaperpile同期フォルダを用意します。使うOSに対応した配布wheel（`.whl`）を指定して、ツールの導入と初期化を行います。Windowsの例です。
 
-1. **`bukan/install.cmd`を実行する。** CLI、両MCP、PDF処理ツール、研究用Python環境をユーザーのAppDataへ導入します。研究フォルダが未設定なら、`%LOCALAPPDATA%/bukan/workspaces/default`を作成します。
-2. **CodexへBukanプラグインをインストールする。** インストーラーが登録した個人マーケットプレイスから選ぶか、完了時に表示される`codex plugin add ...`コマンドを実行します。
+```powershell
+python -m pip install /path/to/bukan-0.2.2-py3-none-win_amd64.whl
+python -m bukan install
+```
 
-新しい会話で「Bukanの接続先を確認して、保存済み文献から調査を始めて」と依頼できます。Python・uv・Popplerの事前導入、管理者権限、システムPATHの編集は不要です。初回の依存取得にはネットワーク接続が必要です。Paperpileは自動検出し、既存の研究フォルダが設定済みなら、その場所を引き継ぎます。
+続いて、**Codexの個人マーケットプレイスからBukanプラグインをインストール**します。完了時に表示される`codex plugin add ...`コマンドでも追加できます。新しい会話で「Bukanの接続先を確認して、保存済み文献から調査を始めて」と依頼してください。
 
-保存場所と変更方法、Linuxの手動導入、一般のMCPクライアントへの接続は[利用ガイド](docs/usage.md)を参照してください。上の2段階インストーラーはWindows用です。
+`pip install`はパッケージの導入、`python -m bukan install`はAppData等への配置、依存ツールの準備、研究フォルダの初期化とプラグインの登録を担当します。研究フォルダが未設定ならWindowsでは`%LOCALAPPDATA%/bukan/workspaces/default`を作成し、設定済みならその場所を引き継ぎます。wheelにはRustの実行ファイルを同梱するため、利用者のコンパイルは不要です。
+
+PyPIにはまだ公開していません。現時点では上のようにwheelのパスを指定してください。Linuxでは対応するwheelとディストリビューションのPopplerが必要です。Pythonを入れずに始めるWindows向けには、配布zipの`bukan/install.cmd`も残しています。詳細は[利用ガイド](docs/usage.md)を参照してください。
 
 ## CLIから使う
 
-インストーラーが表示した実行ファイルを使います。以下の`bukan`はその実行ファイルを指し、PATHへの追加は任意です。
+pipで導入した環境では`bukan`、または`python -m bukan`から実行します。`install`と`update`はPython側のコマンドで、その他は同梱のRust CLIへ渡します。Rust側のコマンドは、インストーラーが表示する実行ファイルの絶対パスでも呼び出せます。
 
 | コマンド | 用途 |
 | --- | --- |
+| `python -m bukan install` | 本体・依存ツール・研究環境を準備し、Codexの個人マーケットプレイスへ登録する |
+| `python -m bukan update` | pipで更新済みの版を本体とプラグインの参照先へ反映する。最新版のダウンロードは行わない |
 | `bukan setup [workspace] [--default]` | 研究環境を準備する。接続先が未設定なら、管理領域にワークスペースを作成する |
 | `bukan paths --json` | 本体とは別に管理するデータ・設定・キャッシュと、ワークスペースの場所を表示する |
 | `bukan research [workspace] -- <engine args>` | 同じ研究DBで検索・改訂・wiki出力などを実行する |
@@ -34,6 +40,7 @@ Codexと、Google Driveから見えるPaperpile同期フォルダを用意した
 ## できること
 
 - Paperpileの同期済み文献を、題名・著者・年・コレクションから検索する
+- 所蔵済みの論文も含め、[公開版・プレプリントの候補](docs/public-access.md)を検索し、リンクの確認結果を履歴付きで保存する
 - PDFの版とSHA-256を固定し、ページ本文とページ画像を取得する
 - 全文読解ノート、条件付きのClaim、原文と一致するEvidence、論文間のRelationを保存する
 - wikiの同じページを改訂し、根拠の更新と未統合の記録を追跡する
@@ -54,7 +61,10 @@ cargo run -p bukan -- --help
 cargo build -p bukan --release --locked
 cargo test --workspace --locked
 uv run --project research-engine --locked pytest research-engine/tests -q
+python -m pip install .
 ```
+
+ソースからの`pip install .`はRustのビルド環境が必要です。ユーザーのAppDataや研究データの初期化は、開発用ビルド中にも行いません。
 
 ```text
 crates/bukan/          CLI・文献索引・PDF・MCP・ワークスペース
@@ -66,13 +76,20 @@ docs/                 利用手順・保存形式・研究工程
 
 Codexプラグインの配布・導入手順は[プラグインの説明](plugins/bukan/README.md)を参照してください。研究エンジンとSKILLを含む配布物を使い、利用者の研究データをアプリケーションのリポジトリやプラグインへコピーしません。
 
-Windowsの配布物をローカルで作る例です。Linuxでは実行ファイルを`target/release/bukan`、対象を`x86_64-unknown-linux-gnu`に替えます。
+wheelはリポジトリのルートで次のように作成します。Rust CLIもビルドし、`dist/`へ出力します。AppDataや研究ワークスペースの初期化は行いません。
+
+```powershell
+python -m pip install build
+python -m build --wheel
+```
+
+Windowsの配布zipをローカルで作る例です。先に`cargo build -p bukan --release --locked`を実行します。Linuxでは実行ファイルを`target/release/bukan`、対象を`x86_64-unknown-linux-gnu`に替えます。
 
 ```powershell
 python scripts/package_release.py --binary target/release/bukan.exe --target x86_64-pc-windows-msvc --output-dir dist
 ```
 
-対応・配布対象はWindowsとLinuxです。GitHub Actionsは両環境用のzipを生成します。Releaseは下書きとして作り、公開は別途行います。macOSは現時点では動作保証の対象外です。
+対応・配布対象はWindowsとLinuxのx86_64です。GitHub Actionsは両環境用のzipとwheelを生成します。Linuxの配布wheelはmuslを使ってビルドし、ローカルで通常ビルドしたGNU版wheelはビルド環境に依存します。Releaseは下書きとして作り、公開は別途行います。macOSは現時点では動作保証の対象外です。
 
 ## 研究工程を確認する
 

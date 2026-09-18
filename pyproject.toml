@@ -1,0 +1,32 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bukan"
+dynamic = ["version"]
+description = "Local literature tools and evidence-backed research MCP servers"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["uv==0.12.15"]
+
+[project.scripts]
+bukan = "bukan:main"
+
+[tool.hatch.version]
+path = "crates/bukan/Cargo.toml"
+pattern = '^version\s*=\s*"(?P<version>[^"]+)"'
+
+[tool.hatch.build.targets.wheel]
+packages = ["python/bukan"]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "scripts/wheel_hook.py"
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "pyproject.toml", "README.md", "Cargo.toml", "Cargo.lock", "crates/bukan",
+    "python/bukan", "scripts", "plugins/bukan", "templates/workspace",
+    "research-engine/pyproject.toml", "research-engine/uv.lock", "research-engine/src",
+]
+exclude = ["**/__pycache__", "**/*.pyc", "**/target", "**/.pytest_cache", "**/cache"]

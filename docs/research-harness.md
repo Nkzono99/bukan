@@ -49,6 +49,7 @@ the skill. Avoid duplicating new mandatory rules across every document.
 | Research store | Typed entities, fixed references, revision conflicts, immutable Sources/Evidence, exact excerpt spans and atomic writes | Whether an excerpt supports the full result, conditions and caveats |
 | Review planning | Matching paper/hash/page count, current complete coverage declarations, claimed task ownership and completion tied to the current note | Scientific correctness, audit independence and whether every accepted Claim was checked |
 | Wiki records | Pinned basis, saved revisions, stale-basis/dependent-section work and unintegrated candidates | Scientific relevance, effect of a correction, completeness of non-citing discovery and current interpretation |
+| Public-copy metadata | Crossref/OpenAlex candidate queries, bounded URL checks, revisioned reports and JSON/Markdown retrieval | Bibliographic identity, actual full-text readability, license interpretation and completeness of public-copy discovery |
 | Export | Versioned documents and assets, portable bundles, preservation of local edits | Correct equations, readable crops and successful rendering in the user's actual preview |
 | Host coordination | Persistent tasks expose work that a running host can resume | Dispatch, actual worker capacity, resource checkpoints and exhaustive survey decisions |
 
@@ -57,6 +58,9 @@ supporting references; it is not a general reverse scientific-dependency search.
 Wiki candidate matching is lexical, not a semantic relevance judgment. Sidecar
 search/acquisition ledgers are maintained by the host and are not automatically
 ingested or protected by DB revision checks.
+Public-copy reports saved with `save_public_access` are separate: they have DB
+revision checks and history. Their discovery/access metadata does not imply
+acquisition, reading coverage, or scientific validation.
 
 Reading, scientific audit and preview QA remain separate. The research store's
 `full_text_reviewed` status records coverage declarations. A completed task or

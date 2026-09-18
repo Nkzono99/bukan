@@ -39,7 +39,7 @@ try {
     if ($metadata.formatVersion -ne 1 -or $metadata.target -ne 'x86_64-pc-windows-msvc' -or $metadata.binary -ne 'bin/bukan.exe') {
         throw 'Use the Bukan Windows x64 release bundle.'
     }
-    $required = @('bin/bukan.exe', 'windows-dependencies.json', 'install_windows.py', 'install_local.py')
+    $required = @('bin/bukan.exe', 'windows-dependencies.json', 'install_toolkit.py', 'install_local.py')
     foreach ($name in $required) {
         if ($name -notin $metadata.files.PSObject.Properties.Name) { throw "Incomplete bundle: $name" }
     }
@@ -79,7 +79,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Managed Python installation failed. Rerun install.cmd to retry.' }
     $python = & $uv --no-config python find --managed-python 3.12
     if ($LASTEXITCODE -ne 0) { throw 'Managed Python was not found.' }
-    & $python -I -B -X utf8 (Join-Path $Bundle 'install_windows.py') --bundle $Bundle --uv-archive $archive
+    & $python -I -B -X utf8 (Join-Path $Bundle 'install_toolkit.py') --bundle $Bundle --uv-archive $archive
     if ($LASTEXITCODE -ne 0) { throw 'Bukan installation failed. Rerun install.cmd after fixing the reported problem.' }
 } catch {
     Write-Host $_.ScriptStackTrace

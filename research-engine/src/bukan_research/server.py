@@ -1,11 +1,15 @@
 """MCP is an adapter; the store also works without an MCP host or an LLM."""
 
+import asyncio
+
 from mcp.server.fastmcp import FastMCP
 
 from .models import Write
 from .notes import get_note, export_note
 from .review_workflow import ReviewTarget, plan_reviews
 from .store import Store
+from . import public_access
+from .public_access import AccessReport, PaperQuery
 
 
 def create_server(store: Store) -> FastMCP:
@@ -22,6 +26,9 @@ def create_server(store: Store) -> FastMCP:
         " Write display equations with standalone $$ delimiters. Embed important figures and inspect the final export in the target preview."
         " Wiki pages contain current interpretations; never treat generated wiki prose as original evidence."
         " Read wiki update tasks and unintegrated candidates before synthesis. Save decisions and checkpoints; completion requires a page revision or a reasoned unchanged outcome."
+        " Public-copy discovery is metadata work: it does not require full-paper review and remains useful when a local PDF exists."
+        " Use find_public_versions, check_public_urls and save_public_access; merge existing saved reports before updating."
+        " Metadata reports, HTTP reachability, full-text access, identity matching and license verification are separate."
     ))
 
     @server.tool()
@@ -53,6 +60,51 @@ def create_server(store: Store) -> FastMCP:
     def store_info() -> dict:
         """Report current record counts and format version."""
         return store.info()
+
+    @server.tool()
+    async def find_public_versions(papers: list[PaperQuery], providers: list[str] | None = None) -> dict:
+        """Find public-copy candidates for 1..20 papers, even when their PDFs are owned locally.
+
+        Accept Bukan/research paper_id, DOI, or title with optional authors/year.
+        Query Crossref and OpenAlex by default; bibliographic matches are provisional.
+        Network errors/403/429 never mean non-OA. Results are NOT saved automatically.
+        Search existing public-access reports and merge corrections before saving.
+        """
+        return await asyncio.to_thread(public_access.find_public_versions, store, papers, providers)
+
+    @server.tool()
+    async def check_public_urls(urls: list[str]) -> dict:
+        """Check 1..20 public HTTP(S) URLs without cookies, login, or full PDF downloads.
+
+        Checks record time, status, final URL, MIME type and a PDF signature sample.
+        200 only means reachable, not free full text; 403/timeouts leave rights unknown.
+        Copy each returned check onto the matching candidate, then save explicitly.
+        """
+        return await asyncio.to_thread(public_access.check_public_urls, urls)
+
+    @server.tool()
+    def save_public_access(report: AccessReport, expected_revision: int = 0) -> dict:
+        """Save public-copy metadata with history; require current revision for corrections.
+
+        Also accepts candidates from external search/plugins with provider, source_url
+        and discovered_at. A partial report needs no PDF acquisition or full reading.
+        Preserve still-useful earlier candidates when merging a new search.
+        """
+        return public_access.save_public_access(store, report, expected_revision)
+
+    @server.tool()
+    def get_public_access(record_id: str, revision: int | None = None) -> dict:
+        """Retrieve a current or historical public-copy report as JSON and Markdown."""
+        return public_access.get_public_access(store, record_id, revision)
+
+    @server.tool()
+    def search_public_access(query: str = "", limit: int = 20, offset: int = 0) -> dict:
+        """Search saved public-copy reports by literal text/ID/DOI; return JSON and a Markdown list.
+
+        A read does not create storage. Follow next_offset for further results.
+        These are access metadata, not scientific evidence or reading records.
+        """
+        return public_access.search_public_access(store, query, limit, offset)
 
     @server.tool()
     def research_wiki_request(request: dict) -> dict:

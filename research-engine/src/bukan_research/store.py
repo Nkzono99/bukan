@@ -380,7 +380,12 @@ class Store:
 
     def export(self):
         with self.connect() as db:
-            return {"schema_version": db.execute("PRAGMA user_version").fetchone()[0],
+            result = {"schema_version": db.execute("PRAGMA user_version").fetchone()[0],
                     "records": [self._decode(row) for row in db.execute(
                         "SELECT * FROM records ORDER BY id,revision")],
                     "heads": dict(db.execute("SELECT id,revision FROM heads").fetchall())}
+            if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='public_access_reports'").fetchone():
+                result["public_access"] = {"format_version": 1, "reports": [
+                    {"report": json.loads(row["body"]), "revision": row["revision"], "created_at": row["created_at"]}
+                    for row in db.execute("SELECT * FROM public_access_reports ORDER BY id,revision")]}
+            return result

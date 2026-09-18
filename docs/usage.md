@@ -4,16 +4,22 @@ Bukanを導入し、Codexから文献検索、全文読解、根拠の点検、w
 
 研究フォルダには`bukan.toml`と`data/research.sqlite`があります。以前のBukan GUIで使っていたものも、そのまま指定できます。Bukan本体、Codexプラグイン、研究データは別々に管理します。
 
-## Windowsはツールとプラグインを順に入れる
+## pipでツールを入れて初期化し、プラグインを追加する
 
-前提はCodexの導入と、Google DriveからPaperpileの同期フォルダが見えることです。Driveのログイン・同期はDrive側で済ませます。Windows用の配布zipを展開し、次の2操作を行います。
+Python 3.11以上の64-bit環境とCodexを用意し、Google DriveでPaperpileの同期フォルダを表示できるようにします。BukanはWindowsとLinuxのx86_64に対応しています。LinuxではディストリビューションのPopplerを先に導入し、`pdfinfo`、`pdftotext`、`pdftoppm`をPATHから使えるようにしてください。
 
-1. **展開した`bukan/install.cmd`を実行する。** ダブルクリック、またはターミナルから実行できます。Bukan本体をAppDataへ配置し、固定版のuvとPoppler、研究用Python環境を準備します。`bukan setup`を実行して未作成の研究DBを用意し、個人マーケットプレイスへBukanを登録します。
-2. **CodexにBukanプラグインをインストールする。** 個人マーケットプレイスのBukanを選ぶか、インストーラーが表示した`codex plugin add bukan@<マーケットプレイス名>`を実行します。既存のマーケットプレイス名を使うため、表示された名前をそのまま使ってください。
+まず、OSに対応する配布wheelをpipで導入し、初期化コマンドを実行します。Windowsの例です。Linuxではwheelのファイル名と、必要に応じて`python`を`python3`に置き換えます。システムのPythonにパッケージを追加できない場合は、仮想環境を作ってそのPythonを使ってください。
 
-新しい会話を開き、Bukanの接続先と文献検索を確認します。ホストが追加したプラグインを読み込まない場合は再起動してください。WindowsではPython・uv・Popplerの事前導入やPATHの編集は不要です。初回のダウンロードにはネットワーク接続が必要で、途中で失敗した場合は原因を解消して`install.cmd`を再実行します。
+```powershell
+python -m pip install /path/to/bukan-0.2.2-py3-none-win_amd64.whl
+python -m bukan install
+```
 
-インストーラーはプラグインを有効化せず、他のプラグイン設定やCodexのモデル設定も変更しません。BukanのMCPは導入済み実行ファイルの絶対パスで起動します。日常の調査はCodexから行えるため、CLIをPATHへ追加する必要はありません。
+PyPIにはまだ公開していないため、wheelのパスを指定します。wheelにはコンパイル済みのRust CLI、研究エンジン、SKILLを含みます。Rustの導入は不要です。`pip install`だけでは研究データやCodex設定を作成せず、続く`python -m bukan install`で本体をAppData等へ配置し、`bukan setup`による研究環境の準備と、個人マーケットプレイスへの登録を行います。Windowsでは固定版のuv・Popplerも準備します。Linuxではpipで入るuvと、事前導入したPopplerを使います。
+
+次に、**CodexにBukanプラグインをインストール**します。個人マーケットプレイスのBukanを選ぶか、表示された`codex plugin add bukan@<マーケットプレイス名>`を実行してください。新しい会話を開き、Bukanの接続先と文献検索を確認します。ホストが追加したプラグインを読み込まない場合は再起動してください。
+
+初期化ではプラグインを有効化せず、他のプラグイン設定やCodexのモデル設定も変更しません。MCPはAppData等へ配置した実行ファイルの絶対パスで起動します。pipの仮想環境やScriptsディレクトリをCodexのPATHへ追加する必要はありません。初回の依存取得にはネットワーク接続が必要です。途中で失敗した場合は原因を解消し、`python -m bukan install`を再実行します。
 
 Paperpileはマウント済みのドライブから自動検出します。見つからない場合も研究の保存先は残ります。Driveの接続を確認し、必要ならワークスペースの`bukan.toml`で`paperpile.path`へ同期先の絶対パスを指定します。Paperpileのファイルは読み取り専用です。
 
@@ -32,15 +38,30 @@ Windowsの既定の配置は次のとおりです。
 
 `workspaces/default/`は永続データです。SQLite、wiki、文献ノート、図表、作業記録を含むため、キャッシュ削除の対象にしません。AppData配下でも自動でバックアップされるわけではなく、研究フォルダ全体をバックアップ対象にしてください。既に接続先を設定していれば、新しいフォルダへ移さず元の研究を使います。
 
-実際の保存先は`bukan paths --json`で確認できます。`dataDir`、`configDir`、`cacheDir`、`managedWorkspace`、`defaultWorkspace`を表示します。このガイドの`bukan`は、インストーラーが表示した実行ファイルの絶対パスに置き換えて使えます。名前で呼びたい場合だけ、その`bin`フォルダを自分のPATHへ追加します。
+実際の保存先は`python -m bukan paths --json`で確認できます。`dataDir`、`configDir`、`cacheDir`、`managedWorkspace`、`defaultWorkspace`を表示します。このガイドの`bukan`はpipが登録するコマンドです。PATHに見つからないときは`python -m bukan`に置き換えてください。初期化時に表示される実行ファイルの絶対パスも利用できますが、`install`と`update`はPython側のコマンドです。
 
 Linuxのデータ領域は`$XDG_DATA_HOME/bukan`または`~/.local/share/bukan`、設定は`$XDG_CONFIG_HOME/bukan`または`~/.config/bukan`、キャッシュは`$XDG_CACHE_HOME/bukan`または`~/.cache/bukan`です。絶対パスの`BUKAN_DATA_DIR`、`BUKAN_CONFIG_DIR`、`BUKAN_CACHE_DIR`で各領域を変更できます。`BUKAN_DATA_DIR`を変えても、既存の研究フォルダは移動しません。
 
-Windowsの2段階インストーラーでは、個人マーケットプレイスから参照できるよう、本体のデータ領域をユーザープロファイル内に置きます。`BUKAN_DATA_DIR`でプロファイル外を指定する構成は、下記の手動導入を使ってください。研究ワークスペース自体は別ドライブにも置けます。インストール時の`BUKAN_*`による保存先・接続先の指定は、プラグインのMCP設定にも引き継ぎます。
+個人マーケットプレイスから参照できるよう、本体のデータ領域はホームディレクトリ内に置きます。`BUKAN_DATA_DIR`でホーム外を指定する構成は、下記の手動導入を使ってください。研究ワークスペース自体は別ドライブにも置けます。実際に使うデータ・設定・キャッシュの保存先をMCP設定にも記録するため、Codexの起動環境が異なっても同じ場所を使います。`BUKAN_WORKSPACE`を明示した場合は、その接続先も引き継ぎます。
 
-## Linuxや手動構成で準備する
+## 更新しても研究データは元の場所に残る
 
-Windows用の2段階インストーラー以外では、Python 3.11以上、uv、Popplerを先に用意します。Linuxでは使用中のディストリビューションの方法でPopplerを導入してください。配布物を展開し、Pythonインストーラーを実行します。
+新しいwheelをpipで導入してから、配置済み本体とプラグインの参照先を更新します。次の`<new-wheel-path>`を取得したwheelのパスに置き換えてください。
+
+```powershell
+python -m pip install --upgrade "<new-wheel-path>"
+python -m bukan update
+```
+
+`update`は現在のPython環境に入ったBukanを反映するコマンドです。最新版の検索やPyPIからの取得は行いません。`install`の再実行でも同じ更新を行えます。完了後は表示された手順でCodexのプラグインを更新し、新しい会話を開いてください。本体は版とハッシュで分けて保存するため、既存の研究フォルダやDBを上書きしません。
+
+`pip uninstall bukan`やpip用の仮想環境の削除では、AppData等へ配置済みの本体・依存ツール・研究データや、Codexのプラグイン登録は削除されません。準備済みの研究実行環境が残っていれば、MCPも引き続き使えます。Linuxで実行環境のキャッシュを作り直すときは、wheelをpipで再導入して`python -m bukan install`を実行し、必要なuvを利用できる状態にします。
+
+## Python未導入のWindowsや手動構成で準備する
+
+Python未導入のWindowsでは、配布zipを展開して`bukan/install.cmd`を実行します。ダブルクリックでも起動でき、Python、uv、Popplerの事前導入、管理者権限、システムPATHの編集は不要です。完了後、表示された手順でCodexへプラグインをインストールします。更新時も新しい配布zipの`install.cmd`を実行できます。
+
+依存ツールとプラグイン登録を自分で管理する場合は、従来の手動インストーラーも使えます。Python 3.11以上、uv、Popplerを用意して実行します。
 
 ```sh
 python3 /path/to/bukan/install_local.py --bundle /path/to/bukan

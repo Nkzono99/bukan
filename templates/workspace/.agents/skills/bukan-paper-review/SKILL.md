@@ -1,6 +1,6 @@
 ---
 name: bukan-paper-review
-description: Review PDFs and audit their claims in a Bukan research workspace; maintain research wiki syntheses, acquisition backlogs, and note equation or figure previews.
+description: Review PDFs and audit their claims in a Bukan research workspace; maintain research wiki syntheses, public-copy links, acquisition backlogs, and note equation or figure previews.
 ---
 
 # Bukan paper review
@@ -20,7 +20,7 @@ original pages in a PDF viewer. No Bukan desktop application is required.
 | --- | --- |
 | New or substantive paper review; scientific audit of notes or Claims | [Full review](references/full-review.md) |
 | Literature survey, cross-paper comparison, research history, wiki integration | [Synthesis](references/synthesis.md) |
-| Locate full text or maintain unacquired references | [Acquisition](references/acquisition.md) |
+| Locate full text, prepare public-copy links, or maintain unacquired references | [Acquisition](references/acquisition.md) |
 | Repair or verify equations, figures or portable Markdown | [Preview](references/preview.md) |
 | Use Bukan MCP records, persistent review tasks, asset paths or legacy tools | [Tools](references/tools.md) |
 
@@ -29,6 +29,8 @@ review when it introduces unread papers; an acquisition task can end at a verifi
 PDF and updated backlog. A display repair preserves existing reading coverage and
 audit history, adding scientific revalidation only when meaning changes or an
 error is exposed.
+Public-link discovery can finish with dated candidates and unresolved checks;
+it does not require full-paper reading or an acquired PDF, even for owned papers.
 
 ## Shared completion contract
 

@@ -24,6 +24,7 @@ def main():
     commands.add_parser("export")
     commands.add_parser("serve")
     commands.add_parser("request", help="Read one versioned workspace JSON request from stdin")
+    commands.add_parser("public-access", help="Read one JSON public-copy discovery/access metadata request from stdin")
     commands.add_parser("desktop", help="Compatibility alias for request with legacy author provenance")
     note = commands.add_parser("export-note")
     note.add_argument("id")
@@ -72,6 +73,9 @@ def main():
                     raise ValueError("Request JSON is nested too deeply.") from None
                 author = "desktop-user" if args.command == "desktop" else "cli-user"
                 result = handle_request(store, request, author=author)
+            case "public-access":
+                from .public_access import handle_request
+                result = handle_request(store, json.loads(sys.stdin.read().lstrip("\ufeff")))
             case "serve":
                 from .server import create_server
                 store.info()

@@ -2,12 +2,14 @@ import asyncio
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 from bukan_research.store import Store
+import pytest
 
 
 def test_real_stdio_server_registers_reopens_and_rejects_bad_reference(tmp_path):
@@ -84,5 +86,79 @@ def test_wiki_stdio_api_preserves_author_and_revision_contract(tmp_path):
                 assert not exported.isError
                 assert json.loads(exported.content[0].text)["revision"] == 1
                 assert len(Store(path).history(identifier)) == 2
+
+    asyncio.run(run())
+
+
+def test_public_access_stdio_saves_partial_external_report_and_preserves_history(tmp_path):
+    path = tmp_path / "research.sqlite"
+    Store(path).initialize()
+
+    async def run():
+        params = StdioServerParameters(command=sys.executable,
+            args=["-m", "bukan_research.cli", "--store", str(path), "serve"],
+            env={**os.environ, "PYTHONUTF8": "1"})
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as client:
+                await client.initialize()
+                names = {tool.name for tool in (await client.list_tools()).tools}
+                assert {"find_public_versions", "check_public_urls", "save_public_access",
+                        "get_public_access", "search_public_access"} <= names
+                report = {"id": "external-access", "paper": {"title": "Dust transport"}, "candidates": [{
+                    "url": "https://example.org/manuscript", "provider": "browser-search",
+                    "source_url": "https://example.org/catalog", "version": "acceptedVersion"}]}
+                saved = await client.call_tool("save_public_access", {"report": report})
+                assert not saved.isError
+                assert json.loads(saved.content[0].text)["revision"] == 1
+                report["notes"] = "Identity not yet confirmed"
+                saved = await client.call_tool("save_public_access", {"report": report, "expected_revision": 1})
+                assert not saved.isError and json.loads(saved.content[0].text)["revision"] == 2
+                conflict = await client.call_tool("save_public_access", {"report": report, "expected_revision": 1})
+                assert conflict.isError
+                old = await client.call_tool("get_public_access", {"record_id": "external-access", "revision": 1})
+                assert not old.isError and json.loads(old.content[0].text)["report"]["notes"] == ""
+                found = await client.call_tool("search_public_access", {"query": "Dust"})
+                assert not found.isError
+                data = json.loads(found.content[0].text)
+                assert data["items"][0]["revision"] == 2 and "not_checked" in data["markdown"]
+                invalid = await client.call_tool("check_public_urls", {"urls": ["http://127.0.0.1/private"]})
+                assert not invalid.isError
+                assert json.loads(invalid.content[0].text)["checks"][0]["status"] == "unsafe_url"
+                empty = await client.call_tool("find_public_versions", {"papers": []})
+                assert empty.isError
+
+    asyncio.run(run())
+    assert Store(path).info()["counts"] == {}
+
+
+@pytest.mark.parametrize("name,arguments", [
+    ("find_public_versions", {"papers": [{"doi": "10.1234/test"}]}),
+    ("check_public_urls", {"urls": ["https://example.org/paper"]}),
+])
+def test_network_tools_leave_mcp_responsive(tmp_path, monkeypatch, name, arguments):
+    from bukan_research import public_access
+    from bukan_research.server import create_server
+
+    store = Store(tmp_path / "research.sqlite")
+    store.initialize()
+    started, release = threading.Event(), threading.Event()
+
+    def slow(*args):
+        started.set()
+        release.wait(2)
+        return {"done": True}
+
+    monkeypatch.setattr(public_access, name, slow)
+    server = create_server(store)
+
+    async def run():
+        task = asyncio.create_task(server.call_tool(name, arguments))
+        try:
+            assert await asyncio.to_thread(started.wait, 1)
+            assert not task.done(), "Network work blocked the event loop until completion"
+            await asyncio.wait_for(server.call_tool("store_info", {}), timeout=0.5)
+        finally:
+            release.set()
+            await task
 
     asyncio.run(run())

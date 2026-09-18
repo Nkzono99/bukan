@@ -5,7 +5,9 @@ description: Set up or diagnose a local Bukan CLI installation, choose a researc
 
 # Bukan setup
 
-Use the installed Bukan executable, or `bukan` when its `bin` directory is on PATH.
+Use `python -m bukan`, the pip-installed `bukan` command, or the installed native
+executable. `install` and `update` are Python-side commands; other arguments go
+to the bundled native CLI.
 Read `bukan --help` and the relevant subcommand help before changing settings.
 Keep Paperpile read-only and place research workspaces outside the application
 installation and Paperpile directories.
@@ -15,13 +17,17 @@ installation and Paperpile directories.
    default. Preserve an existing selection unless the user asks to change it;
    an invalid configured path is a problem to resolve, not a reason to create a
    replacement research store.
-2. For the standard Windows installation, run the extracted `install.cmd`, then
-   install the registered Bukan plugin in Codex using the UI or the exact
-   `codex plugin add ...` command printed by the installer. The installer
-   prepares private uv, Poppler, and Python dependencies and runs `bukan setup`;
-   preinstalled Python and global PATH changes are unnecessary. It registers a
-   local marketplace entry but leaves plugin installation to the second step.
-   Linux/manual installations still require dependency tools and host registration.
+2. For a standard installation, use 64-bit Python 3.11+ to pip-install the
+   matching Windows/Linux x86_64 wheel, then run `python -m bukan install`.
+   PyPI publication has not happened; use the wheel path, not `pip install bukan`.
+   Wheel users do not need Rust; source installation with `pip install .` does.
+   Pip installation itself does not initialize user data. The explicit `install`
+   command copies the toolkit into the user data directory, runs `bukan setup`,
+   and registers the personal marketplace. Windows prepares private uv and
+   Poppler; Linux uses pip's uv dependency and requires distribution Poppler
+   on PATH. Install the registered plugin through Codex or the exact printed
+   `codex plugin add ...` command. Windows users without Python can use the
+   extracted `install.cmd` bootstrap instead.
 3. `bukan setup` with no existing selection creates a managed workspace under
    the OS user data directory: `%LOCALAPPDATA%/bukan/workspaces/default` on
    Windows, `$XDG_DATA_HOME/bukan/workspaces/default` or
@@ -41,6 +47,12 @@ installation and Paperpile directories.
 6. Verify both servers through the host and start a new conversation after
    installing or refreshing a plugin. A process starting is not evidence that
    all tools work; check the intended read operation against the chosen workspace.
+
+For updates, install the new wheel with pip, then run `python -m bukan update`
+(or repeat `install`) and refresh the Codex plugin as instructed. `update` uses
+the already installed Python package; it does not fetch a newer release. Both
+commands preserve existing research. Removing the pip package or its virtual
+environment does not delete the copied toolkit, plugin registration, or data.
 
 Use the bundled `bukan-paper-review` skill for scientific reading, audits,
 synthesis, acquisition, and previews. Bukan stores records and performs

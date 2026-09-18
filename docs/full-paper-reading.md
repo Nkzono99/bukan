@@ -9,7 +9,7 @@ PDF取得時にはDriveが実体をダウンロードする場合があるため
 
 ## 準備と起動
 
-Windows用配布物の`install.cmd`はPopplerの`pdfinfo`、`pdftotext`、`pdftoppm`をBukan専用の依存領域へ準備します。通常の[2段階の導入](usage.md)では、Popplerの別途インストールやPATH編集は不要です。
+Windowsでは`python -m bukan install`、または配布zipの`install.cmd`が、Popplerの`pdfinfo`、`pdftotext`、`pdftoppm`をBukan専用の依存領域へ準備します。通常の[導入手順](usage.md)では、Popplerの別途インストールやPATH編集は不要です。
 
 手動構成ではPopplerをPATHに置きます。Windowsで自分で管理する場合の例です。
 
