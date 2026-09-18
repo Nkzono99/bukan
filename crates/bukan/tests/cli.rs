@@ -1,8 +1,9 @@
 use serde_json::Value;
 use std::{
     fs,
+    io::Write,
     path::Path,
-    process::{Command, Output},
+    process::{Command, Output, Stdio},
 };
 
 fn command(temporary: &Path) -> Command {
@@ -47,6 +48,62 @@ fn configured_root(output: Output) -> String {
         .as_str()
         .unwrap()
         .to_owned()
+}
+
+#[test]
+fn mcp_stdio_keeps_protocol_errors_and_tool_results_separate() {
+    let temporary = tempfile::tempdir().unwrap();
+    let root = init(temporary.path(), "workspace");
+    let mut child = command(temporary.path())
+        .arg("mcp")
+        .arg(&root)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let requests = concat!(
+        "not json\n",
+        "{\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}\n",
+        "{\"method\":\"notifications/initialized\"}\n",
+        "{\"id\":2,\"method\":\"tools/list\"}\n",
+        "{\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"prepare_paperpile_import\",\"arguments\":{\"format\":\"identifiers\",\"text\":\"10.1234/Example\"}}}\n",
+        "{\"id\":4,\"method\":\"tools/call\",\"params\":{\"name\":\"unknown\"}}\n",
+        "{\"id\":5,\"method\":\"unknown\"}\n",
+    );
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(requests.as_bytes())
+        .unwrap();
+    let output = checked(child.wait_with_output().unwrap());
+    let responses: Vec<Value> = String::from_utf8(output.stdout)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    assert_eq!(responses.len(), 6); // Notifications have no response.
+    assert_eq!(responses[0]["error"]["code"], -32700);
+    assert!(responses[0]["id"].is_null());
+    assert_eq!(responses[1]["result"]["protocolVersion"], "2025-06-18");
+    assert!(responses[2]["result"]["tools"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|tool| tool["name"] == "paperpile_import_references"));
+    let result = &responses[3]["result"];
+    assert_eq!(result["isError"], false);
+    let prepared: Value =
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(prepared["pasteText"], "10.1234/example");
+    assert_eq!(prepared["registrationPerformed"], false);
+    assert_eq!(responses[4]["result"]["isError"], true);
+    assert_eq!(responses[5]["error"]["code"], -32601);
+    for (id, response) in responses.iter().skip(1).enumerate() {
+        assert_eq!(response["id"], id + 1);
+        assert_eq!(response["jsonrpc"], "2.0");
+    }
 }
 
 #[test]

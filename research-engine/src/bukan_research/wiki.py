@@ -9,7 +9,9 @@ from markdown_it import MarkdownIt
 
 from .models import ENTITY, Ref, WikiBasis, WikiCandidate, WikiPage, WikiSection, WikiTask, references
 from .note_assets import bundle_images
-from .notes import _check_export, _export_path, _write_export
+from .exports import export_path, publish_bundle
+from .record_markdown import literal_text, record_markdown
+from .store import TransactionStore
 
 
 def prepare_page(page, old):
@@ -255,16 +257,15 @@ def sync_work(db, now=None):
 
 def wiki_authoring_path(store, identifier):
     key = hashlib.sha256(identifier.encode()).hexdigest()[:32]
-    return _export_path(store.path.parent / "wiki" / f"{key}.md")
+    return export_path(store.path.parent / "wiki" / f"{key}.md")
 
 
 def page_markdown(page, revision):
-    from .workspace_api import _literal
-    lines = [f"# {_literal(page.title)}", "", page.summary, "", f"<!-- {page.id}@{revision} -->", ""]
+    lines = [f"# {literal_text(page.title)}", "", page.summary, "", f"<!-- {page.id}@{revision} -->", ""]
     if page.search_through:
-        lines += [f"Search through: {_literal(page.search_through)}", ""]
+        lines += [f"Search through: {literal_text(page.search_through)}", ""]
     for section in page.sections:
-        lines += [f'<a id="{section.id}"></a>', f"## {_literal(section.title)}", "", section.markdown, ""]
+        lines += [f'<a id="{section.id}"></a>', f"## {literal_text(section.title)}", "", section.markdown, ""]
         if section.basis:
             lines += ["### Pinned basis", ""]
             for ref in section.basis:
@@ -275,7 +276,6 @@ def page_markdown(page, revision):
 
 
 def snapshot_page(store, db, page, revision):
-    from .workspace_api import _TransactionStore
     from .notes import get_note, note_authoring_path
 
     def bundle(markdown, base, asset_root):
@@ -315,7 +315,7 @@ def snapshot_page(store, db, page, revision):
     # Referenced wiki revisions own their own frozen note/image snapshots. Keep
     # those contexts separate when two interpretations adopted the same note.
     related = _reachable(resolve, [ref for section in page.sections for ref in section.basis], stop_at_wiki=True)
-    current = _TransactionStore(store, db)
+    current = TransactionStore(store, db)
     for key in related:
         if resolve(Ref(id=key[0], revision=key[1])).kind == "paper_note" and key not in note_documents:
             note = get_note(current, *key)
@@ -334,7 +334,6 @@ def snapshot_page(store, db, page, revision):
 
 def _portable_bundle(store, db, identifier, revision):
     """Bundle linked wiki revisions and their exact provenance into local Markdown files."""
-    from .workspace_api import _record_markdown
 
     root = (identifier, revision, None)
     root_row = db.execute("SELECT created_at FROM records WHERE id=? AND revision=?", root[:2]).fetchone()
@@ -390,7 +389,7 @@ def _portable_bundle(store, db, identifier, revision):
             if note is None:
                 # A historical reading link is not declared evidence. Preserve its
                 # stored text without silently fetching mutable image assets.
-                markdown = _record_markdown(record)
+                markdown = record_markdown(record)
                 choices = note_contexts(key[2] or root[:2], key[:2])
                 if choices:
                     markdown = "# Adopted note snapshots\n\nThis note was captured in multiple wiki interpretations. Choose the relevant frozen figure context.\n\n" + "\n".join(
@@ -400,7 +399,7 @@ def _portable_bundle(store, db, identifier, revision):
                 markdown = note[0]
                 frozen_note = True
         else:
-            markdown = _record_markdown(record)
+            markdown = record_markdown(record)
         refs = references(entity)
         if not isinstance(entity, WikiPage) and refs:
             markdown += "\n## Pinned references\n\n" + "\n".join(
@@ -449,19 +448,10 @@ def export_wiki(store, identifier, revision=None):
             raise ValueError("Wiki revision is missing its immutable image snapshot.")
         markdown, documents, assets, frozen_references = _portable_bundle(store, db, identifier, revision)
     key = hashlib.sha256(identifier.encode()).hexdigest()[:32]
-    target = _export_path(store.path.parent / "wiki" / key / f"r{revision}" / "index.md")
-    files = {_export_path(target.parent / "assets" / name): content for name, content in assets.items()}
-    files.update({_export_path(target.parent / name): content for name, content in documents.items()})
-    files[target] = markdown.encode("utf-8")
-    published = target.exists()
-    for path, content in files.items():
-        if path.exists():
-            _check_export(path, content)
-        elif published:
-            raise ValueError(f"Export contains local edits (missing file): {path}")
-    for path, content in files.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        _write_export(path, content)
+    target = export_path(store.path.parent / "wiki" / key / f"r{revision}" / "index.md")
+    files = {target.parent / "assets" / name: content for name, content in assets.items()}
+    files.update({target.parent / name: content for name, content in documents.items()})
+    publish_bundle(target, markdown, files)
     return {"id": identifier, "revision": revision, "markdown": markdown, "previewMarkdown": snapshot[0], "path": str(target),
             "frozenReferences": [{**item, "previewPath": str(target.parent / item["relativePath"])} for item in frozen_references],
             "editPath": str(wiki_authoring_path(store, identifier)), "export_format_version": 2}
@@ -540,19 +530,17 @@ def wiki_home(store, query="", page_type=None, category=None, offset=0, limit=50
 
 
 def _preview_section(frozen, page, section):
-    from .workspace_api import _literal
-    prefix = f'<a id="{section.id}"></a>\n## {_literal(section.title)}\n\n'
+    prefix = f'<a id="{section.id}"></a>\n## {literal_text(section.title)}\n\n'
     body = frozen.split(prefix, 1)[1]
     for following in page.sections[page.sections.index(section) + 1:]:
-        body = body.split(f'<a id="{following.id}"></a>\n## {_literal(following.title)}\n\n', 1)[0]
+        body = body.split(f'<a id="{following.id}"></a>\n## {literal_text(following.title)}\n\n', 1)[0]
     if section.basis:
         body = body.rsplit("\n\n### Pinned basis\n\n", 1)[0]
     return body.rstrip()
 
 
 def _preview_summary(frozen, page, revision):
-    from .workspace_api import _literal
-    return frozen.split(f"<!-- {page.id}@{revision} -->", 1)[0].removeprefix(f"# {_literal(page.title)}\n\n").strip()
+    return frozen.split(f"<!-- {page.id}@{revision} -->", 1)[0].removeprefix(f"# {literal_text(page.title)}\n\n").strip()
 
 
 def wiki_detail(store, identifier, revision=None, *, strict_export=False):

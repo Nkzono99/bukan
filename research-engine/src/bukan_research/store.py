@@ -389,3 +389,19 @@ class Store:
                     {"report": json.loads(row["body"]), "revision": row["revision"], "created_at": row["created_at"]}
                     for row in db.execute("SELECT * FROM public_access_reports ORDER BY id,revision")]}
             return result
+
+
+class TransactionStore(Store):
+    """Borrow an open Store connection; its caller owns commit, rollback and close.
+
+    Nested Store operations see uncommitted revisions without opening another
+    connection or committing the surrounding transaction.
+    """
+
+    def __init__(self, store, db):
+        self.path = store.path
+        self._db = db
+
+    @contextmanager
+    def connect(self, *, write=False):
+        yield self._db

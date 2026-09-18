@@ -4,10 +4,6 @@ All clients use the same Store operations. Note body edits preserve source
 references, reading coverage and provenance pinned to their revisions.
 """
 
-from contextlib import contextmanager
-import html
-import json
-import re
 import uuid
 from typing import Annotated, Literal
 
@@ -15,7 +11,8 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter
 
 from .models import ENTITY, Identifier, PaperNote, WikiPage, WikiSection, WikiTask, WikiCandidate, Ref, Write, references
 from .notes import export_note, get_note, note_authoring_path
-from .store import Store
+from .store import Store, TransactionStore
+from .record_markdown import record_markdown, record_title
 
 SQLITE_MAX_INTEGER = 2**63 - 1
 
@@ -119,25 +116,13 @@ REQUEST = TypeAdapter(Annotated[SummaryRequest | GetRequest | SaveNoteRequest | 
                                 Field(discriminator="operation")])
 
 
-class _TransactionStore(Store):
-    """Reuse Store validation within one outer transaction, including exports."""
-
-    def __init__(self, store, db):
-        self.path = store.path
-        self._db = db
-
-    @contextmanager
-    def connect(self, *, write=False):
-        yield self._db
-
-
 def handle_request(store: Store, payload, *, author="cli-user"):
     request = REQUEST.validate_python(payload)
     if isinstance(request, WikiStatusRequest) and request.operation in {"wiki-status", "migrate"}:
         return {"version": 1, **(store.migrate() if request.operation == "migrate" else store.status())}
     mutations = (SaveNoteRequest, SaveWikiRequest, CreateWikiRequest, CreateWikiTaskRequest, UpdateWikiTaskRequest, DecideWikiCandidateRequest, WikiStatusRequest)
     with store.connect(write=isinstance(request, mutations)) as db:
-        current = _TransactionStore(store, db)
+        current = TransactionStore(store, db)
         match request:
             case WikiHomeRequest():
                 from .wiki import wiki_home
@@ -219,12 +204,6 @@ def handle_request(store: Store, payload, *, author="cli-user"):
     return {"version": 1, **result}
 
 
-def _title(entity):
-    text = next((entity[key] for key in ("title", "text", "excerpt", "locator", "note_id")
-                 if entity.get(key)), entity["id"])
-    return " ".join(text.split())[:180]
-
-
 def _summary(store, record):
     entity = record["entity"]
     if entity["kind"] == "wiki_page":
@@ -233,7 +212,7 @@ def _summary(store, record):
     text = next((entity[key] for key in ("markdown", "scope", "rationale", "text", "excerpt",
                                         "problem", "authors", "uri") if entity.get(key)), "")
     result = {"id": entity["id"], "revision": record["revision"], "kind": entity["kind"],
-              "title": _title(entity), "summary": " ".join(text.split())[:300],
+              "title": record_title(entity), "summary": " ".join(text.split())[:300],
               "updatedAt": record["created_at"]}
     if "state" in entity:
         result["state"] = entity["state"]
@@ -253,7 +232,7 @@ def _get_record(store, record_id, revision=None, *, strict_export=False):
         from .wiki import wiki_detail
         return wiki_detail(store, record_id, revision, strict_export=strict_export)
     result = {"id": entity.id, "revision": record["revision"], "kind": entity.kind,
-              "title": _title(record["entity"]), "editable": isinstance(entity, PaperNote),
+              "title": record_title(record["entity"]), "editable": isinstance(entity, PaperNote),
               "references": [ref.model_dump() for ref, _ in references(entity)]}
     if isinstance(entity, PaperNote):
         # Keep authoring paths (../../../note-assets/...) in the editor. The
@@ -275,32 +254,5 @@ def _get_record(store, record_id, revision=None, *, strict_export=False):
         result["markdown"] = preview["markdown"]
         result["readingStatus"] = preview["reading_status"]
     else:
-        result["markdown"] = _record_markdown(record)
+        result["markdown"] = record_markdown(record)
     return result
-
-
-def _literal(text):
-    """Display stored prose as text, without creating links or embedded HTML."""
-    return re.sub(r"([\\`*_{}\[\]()#+.!|>~-])", r"\\\1", html.escape(str(text), quote=False))
-
-
-def _record_markdown(record):
-    entity = record["entity"]
-    lines = [f"# {_literal(_title(entity))}", "",
-             f"- Record: `{entity['id']}@{record['revision']}`",
-             f"- Kind: `{entity['kind']}`",
-             f"- Updated: {_literal(record['created_at'])}",
-             f"- Author: {_literal(record['author'])}",
-             "- Scientific interpretation: not independently verified by the store", ""]
-    for key, value in entity.items():
-        if key in {"id", "kind"} or value is None or value == "" or value == []:
-            continue
-        lines += [f"## {_literal(key.replace('_', ' ').capitalize())}", ""]
-        if isinstance(value, (dict, list)) or key in {"text", "excerpt"} and entity["kind"] in {"source", "evidence"}:
-            text = json.dumps(value, ensure_ascii=False, indent=2) if isinstance(value, (dict, list)) else value
-            # Longer fences preserve even captured source containing Markdown.
-            fence = "`" * max(3, max((len(run) + 1 for run in re.findall(r"`+", text)), default=0))
-            lines += [fence, text, fence, ""]
-        else:
-            lines += [_literal(value), ""]
-    return "\n".join(lines).rstrip() + "\n"

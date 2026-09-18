@@ -74,6 +74,30 @@ def test_pinned_images_and_history_survive_asset_changes(store):
     assert "path" not in detail
 
 
+@pytest.mark.parametrize("directory", ["assets", "references"])
+@pytest.mark.parametrize("edit", ["modify", "remove"])
+def test_export_preserves_local_changes_to_images_and_references(store, directory, edit):
+    assets = store.path.parent / "wiki-assets"
+    assets.mkdir()
+    (assets / "figure.png").write_bytes(b"original-image")
+    entity = page()
+    entity.sections[0].markdown += "\n\n![Figure](../wiki-assets/figure.png)"
+    put(store, entity)
+    target = Path(export_wiki(store, entity.id)["path"])
+    changed = next((target.parent / directory).iterdir())
+    if edit == "modify":
+        changed.write_bytes(b"Human correction")
+    else:
+        changed.unlink()
+    before = {path.relative_to(target.parent): path.read_bytes()
+              for path in target.parent.rglob("*") if path.is_file()}
+    with pytest.raises(ValueError, match="local edits"):
+        export_wiki(store, entity.id)
+    after = {path.relative_to(target.parent): path.read_bytes()
+             for path in target.parent.rglob("*") if path.is_file()}
+    assert after == before
+
+
 def test_save_preserves_basis_resets_audit_and_conflicts(store):
     entity = page()
     entity.sections[0].audit = [WikiAudit(reviewer="auditor", reviewed_revision=1, reviewed_at="2026-09-15")]

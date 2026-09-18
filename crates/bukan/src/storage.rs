@@ -234,13 +234,13 @@ mod tests {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("workspace");
         workspace::init_workspace(&root, None, Some(".BUKAN")).unwrap();
-        let list = crate::mcp::PresentedPaperList {
+        let list = crate::paper_lists::PresentedPaperList {
             title: "Fixture".into(),
             description: String::new(),
             papers: Vec::new(),
             updated_at: 0,
         };
-        assert!(crate::mcp::write_presented_list(&root, &list).is_err());
+        assert!(crate::paper_lists::write_presented_list(&root, &list).is_err());
         assert!(!root.join(".BUKAN").exists());
         let other = temporary.path().join("other-workspace");
         assert!(workspace::init_workspace(&other, None, Some("NOTES")).is_err());
