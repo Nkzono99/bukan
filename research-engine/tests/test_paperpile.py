@@ -80,9 +80,11 @@ def fixture_page(browser, *, total=2, duplicates=0, skip=True, destination="My L
             route.fulfill(content_type='text/html', body=content)
     context.route('**/*', route_handler)
     page = context.new_page()
-    page.set_default_timeout(1000)
+    # Hosted Windows Chrome can need over a second to become actionable.
+    # Match the runtime's action timeout; individual timeout tests stay explicit.
+    page.set_default_timeout(10_000)
     page.goto('https://paperpile-fixture.test/')
-    return context, PaperpileUI(page, timeout_ms=1000), calls
+    return context, PaperpileUI(page, timeout_ms=10_000), calls
 
 
 def test_import_uses_paste_event_and_verifies_after_reload(ui_browser):

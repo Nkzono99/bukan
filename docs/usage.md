@@ -11,7 +11,7 @@ Python 3.11以上の64-bit環境とCodexを用意し、Google DriveでPaperpile�
 まず、OSに対応する配布wheelをpipで導入し、初期化コマンドを実行します。Windowsの例です。Linuxではwheelのファイル名と、必要に応じて`python`を`python3`に置き換えます。システムのPythonにパッケージを追加できない場合は、仮想環境を作ってそのPythonを使ってください。
 
 ```powershell
-python -m pip install /path/to/bukan-0.3.0-py3-none-win_amd64.whl
+python -m pip install /path/to/bukan-0.3.1-py3-none-win_amd64.whl
 python -m bukan install
 ```
 

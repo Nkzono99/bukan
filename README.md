@@ -14,7 +14,7 @@ Paperpileと連携する文献管理・研究解析のCLI／MCPツールです�
 1. [Releases](https://github.com/Nkzono99/bukan/releases/latest)からOSに合うwheelを取得し、導入・初期化します。Windowsの例です。
 
    ```powershell
-   python -m pip install ./bukan-0.3.0-py3-none-win_amd64.whl
+   python -m pip install ./bukan-0.3.1-py3-none-win_amd64.whl
    python -m bukan install
    ```
 
