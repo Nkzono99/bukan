@@ -46,6 +46,11 @@ enum Command {
     },
     /// Run the literature MCP over stdio. Workspace: argument > env > saved default.
     Mcp { workspace: Option<PathBuf> },
+    /// Set up or check the dedicated Paperpile registration browser.
+    Paperpile {
+        #[command(subcommand)]
+        command: PaperpileCommand,
+    },
     /// Run the research MCP over stdio, using the workspace's existing store.
     ResearchMcp { workspace: Option<PathBuf> },
     /// Pass engine arguments after --. Relative file arguments use the workspace directory.
@@ -88,6 +93,14 @@ enum Command {
 enum ConfigFormat {
     Json,
     Toml,
+}
+
+#[derive(Subcommand)]
+enum PaperpileCommand {
+    /// Open a separate Chrome profile. Sign in, then close that window.
+    Login { workspace: Option<PathBuf> },
+    /// Check live library access without registering any references.
+    Status { workspace: Option<PathBuf> },
 }
 
 #[derive(Subcommand)]
@@ -233,6 +246,17 @@ pub fn run() -> Result<i32, String> {
         }
         Command::Mcp { workspace } => {
             crate::mcp::run_stdio(&bind(workspace.as_deref())?)?;
+        }
+        Command::Paperpile { command } => {
+            let (action, workspace) = match command {
+                PaperpileCommand::Login { workspace } => ("login", workspace),
+                PaperpileCommand::Status { workspace } => ("status", workspace),
+            };
+            print_json(&runtime::paperpile(
+                &bind(workspace.as_deref())?,
+                action,
+                &json!({}),
+            )?)?;
         }
         Command::ResearchMcp { workspace } => {
             let root = bind(workspace.as_deref())?;

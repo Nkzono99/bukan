@@ -30,7 +30,8 @@ pipで導入した環境では`bukan`、または`python -m bukan`から実行�
 | `bukan setup [workspace] [--default]` | 研究環境を準備する。接続先が未設定なら、管理領域にワークスペースを作成する |
 | `bukan paths --json` | 本体とは別に管理するデータ・設定・キャッシュと、ワークスペースの場所を表示する |
 | `bukan research [workspace] -- <engine args>` | 同じ研究DBで検索・改訂・wiki出力などを実行する |
-| `bukan mcp [workspace]` | 読み取り専用の文献索引・PDF取得用MCPを起動する |
+| `bukan mcp [workspace]` | 文献検索・PDF取得・Paperpile登録用MCPを起動する |
+| `bukan paperpile login` / `status` | Paperpile登録用の専用Chromeでログイン／接続確認する |
 | `bukan research-mcp [workspace]` | 研究記録を保存・検索するMCPを起動する |
 | `bukan mcp-config [workspace] [--format json\|toml]` | 2つのMCPを登録する設定を表示する |
 | `bukan init`, `detect`, `doctor`, `scan`, `organize` | ワークスペース作成、Paperpile検出、診断、索引化、分類案の生成 |
@@ -40,6 +41,7 @@ pipで導入した環境では`bukan`、または`python -m bukan`から実行�
 ## できること
 
 - Paperpileの同期済み文献を、題名・著者・年・コレクションから検索する
+- [Paperpileへの文献登録](docs/paperpile-registration.md)を、初回ログイン後はMCPから実行する
 - 所蔵済みの論文も含め、[公開版・プレプリントの候補](docs/public-access.md)を検索し、リンクの確認結果を履歴付きで保存する
 - PDFの版とSHA-256を固定し、ページ本文とページ画像を取得する
 - 全文読解ノート、条件付きのClaim、原文と一致するEvidence、論文間のRelationを保存する
@@ -50,7 +52,7 @@ pipで導入した環境では`bukan`、または`python -m bukan`から実行�
 
 全ページの読解、科学的な独立点検、表示確認は別々に記録します。全文の自動取得や読了フラグだけでは、科学的な妥当性を保証しません。[研究ハーネス](docs/research-harness.md)が指示と検査の役割を、[並列レビュー](docs/parallel-review.md)が担当の配布と保存を定めます。
 
-Paperpileの同期領域には書き込みません。ノート、図表、検索条件、候補、レポートは研究ワークスペースに保存します。文献整理は適用案とインポート候補の生成までで、Paperpileへの登録・変更は別の操作です。
+Paperpileの同期領域には書き込みません。ノート、図表、検索条件、候補、レポートは研究ワークスペースに保存します。登録を依頼された文献は、MCPが専用ChromeからPaperpileのMy Libraryへ追加します。Google Chromeを用意し、初回に`python -m bukan paperpile login`でログインしてください。ホスト側のブラウザ操作機能は不要です。
 
 ## 開発する
 
@@ -60,7 +62,7 @@ RustのCargo workspaceとPythonの[研究エンジン](research-engine/README.md
 cargo run -p bukan -- --help
 cargo build -p bukan --release --locked
 cargo test --workspace --locked
-uv run --project research-engine --locked pytest research-engine/tests -q
+uv run --project research-engine --locked --extra paperpile pytest research-engine/tests -q
 python -m pip install .
 ```
 

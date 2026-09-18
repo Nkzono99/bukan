@@ -2,6 +2,7 @@
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
+    io::Write,
     path::{Component, Path, PathBuf},
     process::{Command, ExitStatus, Output, Stdio},
 };
@@ -12,6 +13,8 @@ const PYTHON_VERSION: &str = "3.12";
 // -I excludes caller modules/user packages; paths are arguments, never Python code.
 const ENTRYPOINT: &str =
     "import sys; sys.path.insert(0, sys.argv.pop(1)); from bukan_research.cli import main; main()";
+const PAPERPILE_ENTRYPOINT: &str =
+    "import sys; sys.path.insert(0, sys.argv.pop(1)); from bukan_research.paperpile import main; main()";
 const IMPORT_CHECK: &str = "import sys; sys.path.insert(0, sys.argv[1]); import markdown_it, mcp, pydantic, bukan_research.cli, bukan_research.server";
 
 #[derive(Debug, Serialize)]
@@ -85,9 +88,16 @@ impl Runtime {
         result
     }
 
-    fn check_imports(&self) -> Result<(), String> {
+    fn check_imports(&self, browser: bool) -> Result<(), String> {
+        let imports = if browser {
+            format!(
+                "{IMPORT_CHECK}; import playwright.sync_api, filelock, bukan_research.paperpile"
+            )
+        } else {
+            IMPORT_CHECK.to_string()
+        };
         let output = hidden_command(&self.python())
-            .args(["-I", "-B", "-X", "utf8", "-c", IMPORT_CHECK])
+            .args(["-I", "-B", "-X", "utf8", "-c", &imports])
             .arg(self.package.join("src"))
             .current_dir(&self.root)
             .stdin(Stdio::null())
@@ -96,7 +106,7 @@ impl Runtime {
         checked_output(output, "Research runtime verification").map(|_| ())
     }
 
-    fn prepare(&self, workspace: &Path) -> Result<(), String> {
+    fn prepare(&self, workspace: &Path, browser: bool) -> Result<(), String> {
         let shared = self.root.parent().expect("version directory");
         for path in [
             self.root.clone(),
@@ -107,16 +117,20 @@ impl Runtime {
         ] {
             settings::validate_external_destination(workspace, &path)?;
         }
-        if self.ready() {
-            return self.check_imports();
+        if self.ready() && (!browser || self.check_imports(true).is_ok()) {
+            return self.check_imports(false);
         }
         let uv = find_uv()?.ok_or_else(|| "uv was not found. Run the Bukan toolkit installer, or install uv from https://docs.astral.sh/uv/getting-started/installation/, then run bukan setup again.".to_string())?;
         fs::create_dir_all(&self.root)
             .map_err(|error| format!("Could not create the runtime directory: {error}"))?;
-        let output = hidden_command(&uv)
+        let mut command = hidden_command(&uv);
+        command.args(["--no-config", "sync"]);
+        if browser {
+            // Preserve ordinary research support on platforms without Playwright.
+            command.args(["--extra", "paperpile"]);
+        }
+        let output = command
             .args([
-                "--no-config",
-                "sync",
                 "--locked",
                 "--no-dev",
                 "--no-install-project",
@@ -134,7 +148,7 @@ impl Runtime {
             .output()
             .map_err(|error| format!("Could not start uv: {error}"))?;
         checked_output(output, "Research runtime setup")?;
-        self.check_imports()?;
+        self.check_imports(browser)?;
         fs::write(self.root.join("ready"), &self.fingerprint)
             .map_err(|error| format!("Could not save runtime readiness: {error}"))
     }
@@ -162,7 +176,7 @@ pub fn status() -> RuntimeStatus {
         Ok(runtime) => {
             let ready = runtime.ready();
             let check = if ready {
-                runtime.check_imports()
+                runtime.check_imports(false)
             } else {
                 Err("Run bukan setup <workspace> to prepare the research runtime.".into())
             };
@@ -190,8 +204,75 @@ pub fn status() -> RuntimeStatus {
 pub fn setup(workspace: &Path) -> Result<bool, String> {
     let store = storage::store_path(workspace)?;
     let runtime = Runtime::discover()?;
-    runtime.prepare(workspace)?;
+    runtime.prepare(workspace, false)?;
     runtime.initialize_missing(workspace, &store)
+}
+
+/// One dedicated browser profile shared across workspaces, never the user's
+/// ordinary Chrome profile or Paperpile's synced source. Python serializes use.
+pub fn paperpile(
+    workspace: &Path,
+    action: &str,
+    request: &serde_json::Value,
+) -> Result<serde_json::Value, String> {
+    if !["login", "status", "import"].contains(&action) {
+        return Err("Unknown Paperpile browser action.".into());
+    }
+    let profile = paperpile_profile(workspace, &settings::data_dir()?)?;
+    if action != "login" && !profile.is_dir() {
+        return Ok(
+            serde_json::json!({"status":"login_required", "detail":"Run: bukan paperpile login"}),
+        );
+    }
+    let runtime = Runtime::discover()?;
+    // Browser operations prepare optional dependencies without opening the DB.
+    // A toolkit update does not require signing in to an existing profile again.
+    runtime.prepare(workspace, true)?;
+    let mut child = hidden_command(&runtime.python())
+        .args(["-I", "-B", "-X", "utf8", "-c", PAPERPILE_ENTRYPOINT])
+        .arg(runtime.package.join("src"))
+        .arg(action)
+        .arg(profile)
+        .current_dir(workspace)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("Could not start Paperpile browser: {error}"))?;
+    if action == "import" {
+        let data = serde_json::to_vec(request).map_err(|error| error.to_string())?;
+        child
+            .stdin
+            .take()
+            .expect("piped stdin")
+            .write_all(&data)
+            .map_err(|error| format!("Could not send the Paperpile request: {error}"))?;
+    } else {
+        drop(child.stdin.take());
+    }
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
+    let output = checked_output(
+        output,
+        "Paperpile browser operation (if import was submitted, its outcome may be unknown)",
+    )?;
+    serde_json::from_slice(&output.stdout).map_err(|error| {
+        format!("Invalid Paperpile browser response; import outcome may be unknown: {error}")
+    })
+}
+
+fn paperpile_profile(workspace: &Path, data: &Path) -> Result<PathBuf, String> {
+    let root = settings::validate_external_destination(workspace, &data.join("paperpile-browser"))?;
+    let profile = settings::validate_external_destination(workspace, &root.join("profile"))?;
+    let lock = settings::validate_external_destination(workspace, &root.join("browser.lock"))?;
+    if !storage::path_is_within(&root, data)
+        || profile != root.join("profile")
+        || lock != root.join("browser.lock")
+    {
+        return Err("The dedicated browser profile and lock must remain within Bukan's browser data directory; external links are not supported.".into());
+    }
+    Ok(profile)
 }
 
 /// Inherit all three streams so an MCP session remains a transparent stdio pipe.
@@ -429,6 +510,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn browser_profile_cannot_link_into_an_ordinary_browser_directory() {
+        let temporary = tempfile::tempdir().unwrap();
+        let workspace = temporary.path().join("workspace");
+        crate::workspace::init_workspace(&workspace, None, None).unwrap();
+        let data = storage::resolve_destination(&temporary.path().join("data")).unwrap();
+        let expected = data.join("paperpile-browser/profile");
+        assert_eq!(paperpile_profile(&workspace, &data).unwrap(), expected);
+        assert!(!data.exists());
+        fs::create_dir_all(expected.parent().unwrap()).unwrap();
+        let normal = temporary.path().join("ordinary-chrome");
+        fs::create_dir(&normal).unwrap();
+        fs::write(normal.join("sentinel"), b"do not touch").unwrap();
+        storage::link_directory(&normal, &expected);
+        assert!(paperpile_profile(&workspace, &data).is_err());
+        assert_eq!(fs::read(normal.join("sentinel")).unwrap(), b"do not touch");
+        assert_eq!(fs::read_dir(&normal).unwrap().count(), 1);
+    }
+
+    #[test]
     fn private_dependencies_reject_traversal_absolute_paths_and_links_outside_root() {
         let temporary = tempfile::tempdir().unwrap();
         let root = temporary.path().join("dependencies");
@@ -527,7 +627,7 @@ mod tests {
             package,
             root: temporary.path().join("private runtime/version"),
         };
-        runtime.prepare(&root).unwrap();
+        runtime.prepare(&root, false).unwrap();
         assert!(runtime.ready());
         for module in ["pydantic.py", "mcp.py", "bukan_research.py"] {
             fs::write(

@@ -6,6 +6,15 @@ Packaging copies the canonical `bukan-paper-review` skill from
 `templates/workspace/.agents/skills/` and bundles the CLI and research engine.
 Do not maintain a second copy of that review skill here.
 
+The `bukan-paperpile` skill uses `paperpile_import_references` to register
+user-selected references in My Library and verify presence through Paperpile's
+Paste UI. Install Google Chrome and run `python -m bukan paperpile login` once;
+sign in and close the dedicated window. Subsequent imports run within the MCP,
+without browser-control tools in the host. Login state stays in Bukan's user-data
+directory, separately from ordinary Chrome. Folder imports and PDF uploads are
+not yet supported. See [registration](https://github.com/Nkzono99/bukan/blob/main/docs/paperpile-registration.md).
+Direct access to synced Paperpile files remains read-only.
+
 An extracted release has this layout:
 
 ```text

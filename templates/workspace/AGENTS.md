@@ -12,6 +12,9 @@ do not change global model configuration for a research assignment.
 - Put candidate references in `candidates/` and approved import files in `imports/`.
   A candidate or workspace collection does not authorize a Paperpile write,
   import, or purchase.
+  When the user requests registration, use the plugin's `bukan-paperpile` skill
+  and `paperpile_import_references` for My Library; keep direct access to synced files read-only. Import
+  preparation, actual registration, PDF acquisition and sync are distinct.
 - The CLI and research MCP share `data/research.sqlite`. Reuse this existing
   store for research requests; do not create another research copy. Wiki pages
   hold current interpretations; paper notes,

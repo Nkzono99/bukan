@@ -107,6 +107,39 @@ fn default_data_location_uses_the_platform_user_directory() {
 }
 
 #[test]
+fn paperpile_login_refuses_profile_under_configured_source_before_setup() {
+    let temporary = tempfile::tempdir().unwrap();
+    let source = temporary.path().join("source-files");
+    fs::create_dir(&source).unwrap();
+    fs::write(source.join("paper.pdf"), b"unchanged source").unwrap();
+    let root = temporary.path().join("workspace");
+    checked(
+        command(temporary.path())
+            .arg("init")
+            .arg(&root)
+            .arg("--paperpile")
+            .arg(&source)
+            .output()
+            .unwrap(),
+    );
+    let output = command(temporary.path())
+        .env("BUKAN_DATA_DIR", &source)
+        .args(["paperpile", "login"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr)
+        .contains("outside the configured Paperpile library"));
+    assert_eq!(
+        fs::read(source.join("paper.pdf")).unwrap(),
+        b"unchanged source"
+    );
+    assert_eq!(fs::read_dir(&source).unwrap().count(), 1);
+    assert!(!temporary.path().join("runtime cache").exists());
+}
+
+#[test]
 fn data_directory_refuses_source_repositories_plugins_and_paperpile() {
     let temporary = tempfile::tempdir().unwrap();
     for (name, marker, contents) in [

@@ -6,7 +6,7 @@ literature notes or Paperpile data.
 
 ## Development rules
 
-- Keep Paperpile access read-only. Never rename, move, delete, or modify synced files.
+- Keep Paperpile synced-file access read-only. Never rename, move, delete, or modify synced files. Explicitly requested reference registration goes through Paperpile's UI (or a documented API), separately from the index and PDF readers.
 - Put reusable workspace defaults under `templates/workspace/`.
 - Keep user-generated indexes, notes, reports, and assignments outside this repository.
 - Changes to workspace formats must remain backward-compatible or increment the format version.

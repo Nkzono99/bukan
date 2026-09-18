@@ -9,7 +9,7 @@
   "interface": {
     "displayName": "Bukan",
     "shortDescription": "Local literature and research tools.",
-    "longDescription": "Connect to a Bukan workspace through local library and research MCP servers, with paper review and setup skills. Paperpile sources remain read-only.",
+    "longDescription": "Connect to a Bukan workspace through local library and research MCP servers, with paper review, setup and Paperpile registration skills. Registration uses a dedicated local Chrome login; synced Paperpile files remain read-only.",
     "developerName": "Bukan contributors",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

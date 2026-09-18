@@ -225,6 +225,31 @@ fn call_tool(workspace_root: &Path, params: &Value) -> Result<Value, String> {
         .cloned()
         .unwrap_or_else(|| json!({}));
     match name {
+        "prepare_paperpile_import" => {
+            let input = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid Paperpile import: {error}"))?;
+            tool_json(crate::paperpile_import::prepare(input)?)
+        }
+        "paperpile_import_references" => {
+            let input = serde_json::from_value(arguments)
+                .map_err(|error| format!("invalid Paperpile registration: {error}"))?;
+            let request = crate::paperpile_import::prepare_registration(input)?;
+            tool_json(crate::runtime::paperpile(
+                workspace_root,
+                "import",
+                &request,
+            )?)
+        }
+        "paperpile_browser_status" => {
+            if arguments != json!({}) {
+                return Err("paperpile_browser_status takes no arguments.".into());
+            }
+            tool_json(crate::runtime::paperpile(
+                workspace_root,
+                "status",
+                &json!({}),
+            )?)
+        }
         "workspace_context" => tool_json(workspace::describe_workspace(workspace_root)?),
         "get_paper_list" => tool_json(read_presented_list(workspace_root)?),
         "persist_paper_list" => {
@@ -407,6 +432,43 @@ fn call_tool(workspace_root: &Path, params: &Value) -> Result<Value, String> {
 
 fn tool_definitions() -> Vec<Value> {
     vec![
+        json!({
+            "name": "paperpile_browser_status",
+            "description": "Check live Paperpile access through Bukan's dedicated Chrome profile. No reference writes. Initial login: bukan paperpile login. Does not use the MCP host's browser or ordinary Chrome profile. May prepare optional browser dependencies and update browser session/cache files.",
+            "annotations": { "readOnlyHint": true, "openWorldHint": true },
+            "inputSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+        }),
+        json!({
+            "name": "paperpile_import_references",
+            "title": "Register references in Paperpile",
+            "description": "Register user-selected DOI/URL lines or BibTeX/RIS in personal My Library using dedicated Chrome, then reload and verify browser-local presence through Paperpile's duplicate preview. Paperpile is local-first: serverSyncVerified is false; do not claim server persistence or other-device availability. Requires one-time bukan paperpile login and installed Google Chrome. Keeps duplicate skipping enabled; never edits synced Drive files. Only My Library supported. BibTeX/RIS requires expectedCount; parsed-count mismatch aborts before import. Unknown outcome may have committed. PDF acquisition and Drive sync are separately unverified. Max 64 KiB, 100 references; small batches recommended.",
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": true },
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["format", "text"],
+                "properties": {
+                    "format": { "type": "string", "enum": ["identifiers", "bibtex", "ris"] },
+                    "text": { "type": "string", "minLength": 1, "maxLength": 65536 },
+                    "destination": { "type": "string", "enum": ["My Library"], "default": "My Library" },
+                    "expectedCount": { "type": "integer", "minimum": 1, "maximum": 100, "description": "Required for BibTeX/RIS: number of distinct requested references. For DOI/URL inputs, must match normalized unique input count if supplied." },
+                    "previewOnly": { "type": "boolean", "default": false, "description": "Parse and check live duplicates, then cancel without importing any references. Useful for checking the integration without library writes." }
+                }
+            }
+        }),
+        json!({
+            "name": "prepare_paperpile_import",
+            "title": "Prepare references for Paperpile registration",
+            "description": "Optionally prepare DOI/URL lines or BibTeX/RIS for Paperpile. DOES NOT register papers, contact Paperpile, save files or launch a browser. paperpile_import_references completes a user-requested My Library import through the dedicated browser. Deduplicates input DOI/URL lines only; actual library duplicates are checked by Paperpile. Text limited to 64 KiB; identifiers to 100 lines.",
+            "annotations": { "readOnlyHint": true, "idempotentHint": true, "openWorldHint": false },
+            "inputSchema": {
+                "type": "object", "additionalProperties": false,
+                "required": ["format", "text"],
+                "properties": {
+                    "format": { "type": "string", "enum": ["identifiers", "bibtex", "ris"] },
+                    "text": { "type": "string", "minLength": 1, "maxLength": 65536 },
+                    "destination": { "type": "string", "minLength": 1, "maxLength": 500, "default": "My Library", "description": "Intended library/folder/label to verify in the browser; this tool does not create or select it." }
+                }
+            }
+        }),
         json!({
             "name": "workspace_context",
             "description": "Identify this server's bound workspace, format version and read-only Paperpile source, including an unavailable source. Research outputs belong to this workspace.",
@@ -987,6 +1049,38 @@ mod tests {
     }
 
     #[test]
+    fn prepares_paperpile_import_without_writes_or_an_online_library() {
+        let temporary = tempfile::tempdir().unwrap();
+        let response = call_tool(
+            temporary.path(),
+            &json!({
+                "name": "prepare_paperpile_import",
+                "arguments": { "format": "identifiers", "text": "10.1234/Example" }
+            }),
+        )
+        .unwrap();
+        let prepared: Value =
+            serde_json::from_str(response["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(prepared["pasteText"], "10.1234/example");
+        assert_eq!(prepared["registrationPerformed"], false);
+        assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 0);
+        assert!(call_tool(
+            temporary.path(),
+            &json!({
+                "name": "prepare_paperpile_import",
+                "arguments": { "format": "identifiers", "text": "10.1234/example", "execute": true }
+            })
+        )
+        .is_err());
+        let tool = tool_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "prepare_paperpile_import")
+            .unwrap();
+        assert_eq!(tool["annotations"]["readOnlyHint"], true);
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+    }
+
+    #[test]
     fn exposes_workspace_scoped_literature_tools() {
         let tools = tool_definitions();
         for name in [
@@ -1008,6 +1102,34 @@ mod tests {
         assert!(tools
             .iter()
             .any(|tool| tool["name"] == "attach_review_figure"));
+    }
+
+    #[test]
+    fn registration_rejects_invalid_requests_before_starting_a_runtime() {
+        let temporary = tempfile::tempdir().unwrap();
+        for arguments in [
+            json!({"format":"identifiers", "text":"10.1234/example", "destination":"Shared"}),
+            json!({"format":"bibtex", "text":"@article{x}"}),
+            json!({"format":"identifiers", "text":"10.1234/example", "skipDuplicates":false}),
+        ] {
+            assert!(call_tool(
+                temporary.path(),
+                &json!({"name":"paperpile_import_references", "arguments":arguments})
+            )
+            .is_err());
+        }
+        assert!(call_tool(
+            temporary.path(),
+            &json!({"name":"paperpile_browser_status", "arguments":{"login":true}})
+        )
+        .is_err());
+        assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 0);
+        let tool = tool_definitions()
+            .into_iter()
+            .find(|tool| tool["name"] == "paperpile_import_references")
+            .unwrap();
+        assert_eq!(tool["annotations"]["readOnlyHint"], false);
+        assert_eq!(tool["annotations"]["openWorldHint"], true);
     }
 
     #[test]

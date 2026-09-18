@@ -9,7 +9,7 @@ Use `python -m bukan`, the pip-installed `bukan` command, or the installed nativ
 executable. `install` and `update` are Python-side commands; other arguments go
 to the bundled native CLI.
 Read `bukan --help` and the relevant subcommand help before changing settings.
-Keep Paperpile read-only and place research workspaces outside the application
+Keep synced Paperpile files read-only and place research workspaces outside the application
 installation and Paperpile directories.
 
 1. Inspect `bukan paths --json` and the current workspace selection. An explicit
@@ -57,3 +57,9 @@ environment does not delete the copied toolkit, plugin registration, or data.
 Use the bundled `bukan-paper-review` skill for scientific reading, audits,
 synthesis, acquisition, and previews. Bukan stores records and performs
 deterministic checks; the agent host runs models and coordinates workers.
+
+For user-requested Paperpile registration, use `bukan-paperpile`. It requires
+installed Google Chrome and one-time `bukan paperpile login`; the user signs in
+in the dedicated window and closes it. `paperpile_browser_status` checks access.
+Login is optional for read-only PDF research and never reuses normal Chrome's
+profile. See `bukan paperpile --help` for the login/status commands.

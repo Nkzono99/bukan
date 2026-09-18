@@ -47,6 +47,9 @@ research workspace, outside the application checkout and read-only Paperpile.
 | Tool | Use |
 | --- | --- |
 | `workspace_context` | Confirm the bound workspace and Paperpile source, including an unavailable source, before research |
+| `paperpile_import_references(format, text, expectedCount?)` | Register user-selected references in My Library through dedicated Chrome and verify live duplicates; BibTeX/RIS requires expectedCount. Initial setup: `bukan paperpile login` |
+| `paperpile_browser_status()` | Check dedicated-browser library access without importing references |
+| `prepare_paperpile_import(format, text, destination)` | Optional input preparation only; no network, browser or library writes |
 | `search_library`, `list_collections` | Search title, authors, year, filename and collection in the read-only index before manually scanning folders |
 | `get_paper(paperId)` | Resolve library metadata for the requested paper |
 | `get_paper_document(paperId)` | Retrieve the actual PDF's SHA-256 and total PDF file page count |

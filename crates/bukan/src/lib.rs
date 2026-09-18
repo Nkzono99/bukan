@@ -12,6 +12,7 @@ pub mod cli;
 pub mod mcp;
 pub mod organization;
 pub mod paper_document;
+pub mod paperpile_import;
 pub mod reviews;
 pub mod runtime;
 pub mod settings;

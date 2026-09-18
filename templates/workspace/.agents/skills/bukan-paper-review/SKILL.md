@@ -34,7 +34,9 @@ it does not require full-paper reading or an acquired PDF, even for owned papers
 
 ## Shared completion contract
 
-- Keep Paperpile read-only. Save generated work in the research workspace and
+- Keep synced Paperpile files read-only. Explicit reference registration uses
+  the plugin's `bukan-paperpile` skill and Paperpile UI; discovery is not an import request.
+  Save generated work in the research workspace and
   preserve human edits, immutable captures and prior revisions.
 - Match reusable notes and caches to the exact PDF hash/version. Distinguish
   full-page reading, scientific audit and target-preview verification in records.
